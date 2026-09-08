@@ -2,8 +2,6 @@ package kv;
 
 import java.io.IOException;
 import java.net.ServerSocket;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 public class KVServer {
 	private static final String DEFAULT_SERVER_NAME = "localhost";
@@ -14,10 +12,8 @@ public class KVServer {
 		ServerSocket kvServerSocket = null;
 		boolean listening = true;
 		
-		
-		Map<String, Entry> store = new ConcurrentHashMap<String, Entry>();
-		
-		KVSharedState ourSharedState = new KVSharedState(store);
+		StorageManager manager = new StorageManager();
+		KVSharedState ourSharedState = new KVSharedState(manager);
 		
 		try {
 			kvServerSocket = new ServerSocket(DEFAULT_SERVER_PORT);

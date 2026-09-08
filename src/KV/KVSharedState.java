@@ -1,35 +1,51 @@
 package kv;
 
+import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class KVSharedState {
 	private Map<String, Entry> store;
 	private final Map<String, Command> commands = new HashMap<String, Command>();
-	
-	public KVSharedState(Map<String, Entry> store) {
+	private final StorageManager manager;
+
+	private int mutationCount;
+
+	public KVSharedState(StorageManager manager) throws IOException {
+		Map<String, Entry> store = new ConcurrentHashMap<>();
+		Map<String, String> snapshot = manager.loadSnapshot();
+
+		for (Map.Entry<String, String> entry : snapshot.entrySet()) {
+			Entry e = new Entry();
+			e.value = entry.getValue();
+			store.put(entry.getKey(), e);
+		}
+
+		this.manager= manager;
 		this.store = store;
-		
+		this.mutationCount = manager.loadLog().size();
+
 		commands.put("PUT", (tokens) ->{
 			String key = tokens[1];
 			String value = tokens[2];
-			
+
 			Response response;
-			
+
 			Entry entry = store.get(key);
-			
+
 			if(entry.value != null) {
 				response = new Response(ExecutionStatus.OK_UPDATED);
 			} else {
 				response = new Response(ExecutionStatus.OK_ADDED);
 			}
-			
-			
+
+
 			entry.value = value;
-			
+
 			return response;
 		});
-		
+
 		commands.put("GET", (tokens) ->{
 			String key = tokens[1];
 			Entry status = store.get(key);
@@ -38,96 +54,101 @@ public class KVSharedState {
 			} else {
 				return new Response(ExecutionStatus.ERR_NOT_FOUND);
 			}
-			
+
 		});
-		
+
 		commands.put("DELETE", (tokens) ->{
 			String key = tokens[1];
 			Entry status = store.remove(key);
-			
+
 			if(status != null) {
 				return new Response(ExecutionStatus.OK_DELETED);
 			} else {
 				return new Response(ExecutionStatus.ERR_NOT_FOUND);
 			}
 		});
-		
+
 	}
-	
+
 	public synchronized boolean acquireLock(String key, String type, String command) throws InterruptedException {
-	    Thread me = Thread.currentThread();
+		Thread me = Thread.currentThread();
 
-	    while (true) {
+		while (true) {
 
-	        Entry entry = store.get(key);
+			Entry entry = store.get(key);
 
-	        // Key currently doesn't exist
-	        if (entry == null) {
+			// Key currently doesn't exist
+			if (entry == null) {
 
-	            // PUT is allowed to create it
-	            if (command.equalsIgnoreCase("PUT")) {
-	                entry = new Entry();
-	                entry.writer = true;
-	                store.put(key, entry);
+				// PUT is allowed to create it
+				if (command.equalsIgnoreCase("PUT")) {
+					entry = new Entry();
+					entry.writer = true;
+					store.put(key, entry);
 
-	                System.out.println(me.getName() + " created and locked " + key);
-	                return true;
-	            }
+					System.out.println(me.getName() + " created and locked " + key);
+					return true;
+				}
 
-	            // GET / DELETE on nonexistent key
-	            return false;
-	        }
+				// GET / DELETE on nonexistent key
+				return false;
+			}
 
-	        if (type.equalsIgnoreCase("writer")) {
+			if (type.equalsIgnoreCase("writer")) {
 
-	            if (!entry.writer && entry.readers == 0) {
-	                entry.writer = true;
+				if (!entry.writer && entry.readers == 0) {
+					entry.writer = true;
 
-	                System.out.println(me.getName() + " got a " + key + " writer lock!");
-	                return true;
-	            }
+					System.out.println(me.getName() + " got a " + key + " writer lock!");
+					return true;
+				}
 
-	        } else {
+			} else {
 
-	            if (!entry.writer) {
-	                entry.readers++;
+				if (!entry.writer) {
+					entry.readers++;
 
-	                System.out.println(me.getName() + " got a " + key + " reader lock!");
-	                return true;
-	            }
-	        }
+					System.out.println(me.getName() + " got a " + key + " reader lock!");
+					return true;
+				}
+			}
 
-	        System.out.println(
-	            me.getName() + " waiting to get a lock as someone else is accessing..."
-	        );
+			System.out.println(
+					me.getName() + " waiting to get a lock as someone else is accessing..."
+					);
 
-	        wait();
-	    }
+			wait();
+		}
 	}
 
 	public synchronized void releaseLock(String key, String type) {
 		Entry entry = store.get(key);
-		
+
 		if (entry == null) {
 			notifyAll(); 
 			return;
 		}
-		
+
 		if (type.equalsIgnoreCase("writer")) {
 			entry.writer = false;
 		} else {
 			entry.readers--;
 		}
-		
+
 		notifyAll(); 
 	}
-	
-	public String processCommand(String[] tokens) {
-		 Command cmd = commands.get(tokens[0].toUpperCase());
-		 
-		 return cmd.execute(tokens).toNetworkString();
+
+	public Response processCommand(String[] tokens) throws IOException {
+		if (!tokens[0].equalsIgnoreCase("GET")) {
+			mutationCount++;
+			manager.appendOperation(tokens);
+		}
+		
+		Command cmd = commands.get(tokens[0].toUpperCase());
+
+		return cmd.execute(tokens);
 	}
-	
+
 	public boolean validateInput(String[] input) {
 		if (input == null || input.length == 0) {
 			return false;
@@ -141,6 +162,6 @@ public class KVSharedState {
 
 		return false;
 	}
-	
+
 
 }

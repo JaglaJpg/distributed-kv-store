@@ -16,12 +16,12 @@ public class Response {
         this.payload = payload;
     }
 
-    // A helper method for your network thread to print the final network string
-    public String toNetworkString() {
-        if (payload != null) {
-            return payload; // Just send the data for a successful GET
-        }
-        return status.name(); // Send "OK_CREATED", "ERR_NOT_FOUND", etc.
+    public ExecutionStatus getStatus() {
+    	return this.status;
+    }
+
+    public String getPayload() {
+    	return this.payload;
     }
 
 }

@@ -20,7 +20,7 @@ public class KVThread extends Thread {
 		try {
 			PrintWriter out = new PrintWriter(kvSocket.getOutputStream(), true);
 			BufferedReader in = new BufferedReader(new InputStreamReader(kvSocket.getInputStream()));
-			String inputLine, outputLine;
+			String inputLine;
 
 			while ((inputLine = in.readLine()) != null) {
 				try {
@@ -42,37 +42,38 @@ public class KVThread extends Thread {
 						
 
 						try {
-							outputLine = mySharedState.processCommand(tokens);
+							Response response = mySharedState.processCommand(tokens);
+							ExecutionStatus status = response.getStatus();
 
 							String action = tokens[0].toLowerCase();
 
 							if (action.equals("put")) {
 							    String value = tokens[2];
-							    if (outputLine.equals("OK_ADDED")) { 
+							    if (status == ExecutionStatus.OK_ADDED) { 
 							        out.println("Successfully added key '" + key + "' with value '" + value + "'");
-							    } else if (outputLine.equals("OK_UPDATED")) { 
+							    } else if (status == ExecutionStatus.OK_UPDATED) { 
 							        out.println("Successfully updated key '" + key + "' to new value '" + value + "'");
 							    }
 							} 
 							else if (action.equals("delete")) {
-							    if (outputLine.equals("OK_DELETED")) { 
+							    if (status == ExecutionStatus.OK_DELETED) { 
 							        out.println("Successfully deleted key '" + key + "'");
-							    } else if (outputLine.equals("ERR_NOT_FOUND")) { 
+							    } else if (status == ExecutionStatus.ERR_NOT_FOUND) { 
 							        out.println("Error: Could not delete because key '" + key + "' does not exist");
 							    }
 							} 
 							else if (action.equals("get")) {
-							    if (outputLine.equals("ERR_NOT_FOUND")) { 
-							        out.println("Error: Key '" + key + "' does not exist");
+							    if (status != ExecutionStatus.ERR_NOT_FOUND) { 
+							    	out.println("Value for '" + key + "': " + response.getPayload());
 							    } else {
-							        out.println("Value for '" + key + "': " + outputLine);
+							        out.println("Error: Key '" + key + "' does not exist");
 							    }
 							}
 						} finally {
 							mySharedState.releaseLock(key, type);
 						}
 					} else {
-						outputLine = "Received incorrect request - only understand: "
+						String outputLine = "Received incorrect request - only understand: "
 								+ "\"PUT <key> <value>\", "
 								+ "\"GET <key>\", "
 								+ "\"DELETE <key>\"";
