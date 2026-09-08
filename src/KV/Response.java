@@ -1,4 +1,4 @@
-package KV;
+package kv;
 
 public class Response {
     private final ExecutionStatus status;
@@ -10,7 +10,7 @@ public class Response {
         this.payload = null;
     }
 
-    // Constructor for data data (GET)
+    // Constructor for data (GET)
     public Response(ExecutionStatus status, String payload) {
         this.status = status;
         this.payload = payload;

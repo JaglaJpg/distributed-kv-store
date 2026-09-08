@@ -1,4 +1,4 @@
-package KV;
+package kv;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -8,24 +8,24 @@ import java.net.Socket;
 import java.net.UnknownHostException;
 
 public class KVClient {
+	private static final String DEFAULT_SERVER_NAME = "localhost";
+	private static final int DEFAULT_SERVER_PORT = 4545; 
 	
 	@SuppressWarnings("resource")
-	public static void main(String[] args) throws IOException{
-		String serverName = "localhost";
-		int serverPort = 4545; 
+	public static void main(String[] args) throws IOException {
 		BufferedReader in = null;
 		PrintWriter out = null;
-		Socket KVClientSocket = null;
+		Socket kvClientSocket = null;
 		
 		try {
-			KVClientSocket = new Socket(serverName, serverPort);
-			out = new PrintWriter(KVClientSocket.getOutputStream(), true);
-			in = new BufferedReader(new InputStreamReader(KVClientSocket.getInputStream()));
+			kvClientSocket = new Socket(DEFAULT_SERVER_NAME, DEFAULT_SERVER_PORT);
+			out = new PrintWriter(kvClientSocket.getOutputStream(), true);
+			in = new BufferedReader(new InputStreamReader(kvClientSocket.getInputStream()));
 		} catch (UnknownHostException e) {
             System.err.println("Don't know about host: localhost ");
             System.exit(1);
         } catch (IOException e) {
-            System.err.println("Couldn't get I/O for the connection to: "+ serverPort);
+            System.err.println("Couldn't get I/O for the connection to: "+ DEFAULT_SERVER_PORT);
             System.exit(1);
         }
 		
@@ -34,9 +34,9 @@ public class KVClient {
 		String fromUser;
 		
 		
-		while(true) {
+		while (true) {
 			fromUser = userIn.readLine();
-			if(fromUser != null) {
+			if (fromUser != null) {
 				System.out.println("Client: " + fromUser);
 				out.println(fromUser);
 			}

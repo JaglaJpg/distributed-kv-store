@@ -1,4 +1,4 @@
-package KV;
+package kv;
 
 public class Entry {
 	public String value;

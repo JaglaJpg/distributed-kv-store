@@ -1,4 +1,4 @@
-package KV;
+package kv;
 
 public enum ExecutionStatus {
 	OK_SUCCESS,
@@ -6,5 +6,4 @@ public enum ExecutionStatus {
 	OK_UPDATED,
 	OK_DELETED,
 	ERR_NOT_FOUND
-
 }

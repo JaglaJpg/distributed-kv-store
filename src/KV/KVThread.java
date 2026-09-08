@@ -1,4 +1,4 @@
-package KV;
+package kv;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -6,43 +6,43 @@ import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.Socket;
 
-public class KVThread extends Thread{
-	private Socket KVSocket = null;
-	private KVSharedState store;
+public class KVThread extends Thread {
+	private Socket kvSocket = null;
+	private KVSharedState mySharedState;
 
-	public KVThread(Socket KVSocket, KVSharedState store) {
-		this.KVSocket = KVSocket;
-		this.store = store;
+	public KVThread(Socket kvSocket, KVSharedState mySharedState) {
+		this.kvSocket = kvSocket;
+		this.mySharedState = mySharedState;
 	}
 
 	public void run() {
 		System.out.println("Initialising");
 		try {
-			PrintWriter out = new PrintWriter(KVSocket.getOutputStream(), true);
-			BufferedReader in = new BufferedReader(new InputStreamReader(KVSocket.getInputStream()));
+			PrintWriter out = new PrintWriter(kvSocket.getOutputStream(), true);
+			BufferedReader in = new BufferedReader(new InputStreamReader(kvSocket.getInputStream()));
 			String inputLine, outputLine;
 
-			while((inputLine = in.readLine()) != null) {
+			while ((inputLine = in.readLine()) != null) {
 				try {
 					String[] tokens = inputLine.trim().split("\\s+");
-					if(store.validateInput(tokens)) {
+					if (mySharedState.validateInput(tokens)) {
 						String key = tokens[1];
 						String type;
 
-						if(tokens[0].equalsIgnoreCase("put") || tokens[0].equalsIgnoreCase("delete")) {
+						if (tokens[0].equalsIgnoreCase("put") || tokens[0].equalsIgnoreCase("delete")) {
 							type = "writer";
 						} else {
 							type = "reader";
 						}
 
-						if(!store.aquireLock(key, type, tokens[0])) {
+						if (!mySharedState.acquireLock(key, type, tokens[0])) {
 							out.println("There is no such key " + key);
 							continue;
 						}
 						
 
 						try {
-							outputLine = store.processCommand(tokens);
+							outputLine = mySharedState.processCommand(tokens);
 
 							String action = tokens[0].toLowerCase();
 
@@ -69,7 +69,7 @@ public class KVThread extends Thread{
 							    }
 							}
 						} finally {
-							store.releaseLock(key, type);
+							mySharedState.releaseLock(key, type);
 						}
 					} else {
 						outputLine = "Received incorrect request - only understand: "
@@ -89,7 +89,7 @@ public class KVThread extends Thread{
 			
 			out.close();
 			in.close();
-			KVSocket.close();
+			kvSocket.close();
 
 		} catch (IOException e) {
 

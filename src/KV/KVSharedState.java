@@ -1,14 +1,14 @@
-package KV;
+package kv;
 
 import java.util.HashMap;
 import java.util.Map;
 
 public class KVSharedState {
-	private Map<String, Entry> myStore;
+	private Map<String, Entry> store;
 	private final Map<String, Command> commands = new HashMap<String, Command>();
 	
 	public KVSharedState(Map<String, Entry> store) {
-		this.myStore = store;
+		this.store = store;
 		
 		commands.put("PUT", (tokens) ->{
 			String key = tokens[1];
@@ -16,7 +16,7 @@ public class KVSharedState {
 			
 			Response response;
 			
-			Entry entry = myStore.get(key);
+			Entry entry = store.get(key);
 			
 			if(entry.value != null) {
 				response = new Response(ExecutionStatus.OK_UPDATED);
@@ -32,7 +32,7 @@ public class KVSharedState {
 		
 		commands.put("GET", (tokens) ->{
 			String key = tokens[1];
-			Entry status = myStore.get(key);
+			Entry status = store.get(key);
 			if(status != null) {
 				return new Response(ExecutionStatus.OK_SUCCESS, status.value);
 			} else {
@@ -43,7 +43,7 @@ public class KVSharedState {
 		
 		commands.put("DELETE", (tokens) ->{
 			String key = tokens[1];
-			Entry status = myStore.remove(key);
+			Entry status = store.remove(key);
 			
 			if(status != null) {
 				return new Response(ExecutionStatus.OK_DELETED);
@@ -54,14 +54,12 @@ public class KVSharedState {
 		
 	}
 	
-	public synchronized boolean aquireLock(String key, String type, String command)
-	        throws InterruptedException {
-
+	public synchronized boolean acquireLock(String key, String type, String command) throws InterruptedException {
 	    Thread me = Thread.currentThread();
 
 	    while (true) {
 
-	        Entry entry = myStore.get(key);
+	        Entry entry = store.get(key);
 
 	        // Key currently doesn't exist
 	        if (entry == null) {
@@ -70,7 +68,7 @@ public class KVSharedState {
 	            if (command.equalsIgnoreCase("PUT")) {
 	                entry = new Entry();
 	                entry.writer = true;
-	                myStore.put(key, entry);
+	                store.put(key, entry);
 
 	                System.out.println(me.getName() + " created and locked " + key);
 	                return true;
@@ -108,14 +106,14 @@ public class KVSharedState {
 	}
 
 	public synchronized void releaseLock(String key, String type) {
-		Entry entry = myStore.get(key);
+		Entry entry = store.get(key);
 		
-		if(entry == null) {
+		if (entry == null) {
 			notifyAll(); 
 			return;
 		}
 		
-		if(type.equalsIgnoreCase("writer")) {
+		if (type.equalsIgnoreCase("writer")) {
 			entry.writer = false;
 		} else {
 			entry.readers--;
