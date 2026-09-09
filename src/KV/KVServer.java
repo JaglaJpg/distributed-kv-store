@@ -12,9 +12,11 @@ public class KVServer {
 		ServerSocket kvServerSocket = null;
 		boolean listening = true;
 		
+		BackupSignal backup = new BackupSignal();
 		StorageManager manager = new StorageManager();
-		KVSharedState ourSharedState = new KVSharedState(manager);
-		
+		KVSharedState ourSharedState = new KVSharedState(manager, backup);
+		new WorkerThread(ourSharedState, backup).start();
+
 		try {
 			kvServerSocket = new ServerSocket(DEFAULT_SERVER_PORT);
 		} catch (IOException e) {

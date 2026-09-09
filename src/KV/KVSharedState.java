@@ -2,29 +2,30 @@ package kv;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public class KVSharedState {
-	private Map<String, Entry> store;
-	private final Map<String, Command> commands = new HashMap<String, Command>();
+	private Map<String, String> store;
+	private final Map<String, Command> commands = new HashMap<>();
+	private Map<String, LockState> locks = new HashMap<>();
 	private final StorageManager manager;
+	private final ReentrantReadWriteLock globalLock = new ReentrantReadWriteLock(true);
+	private BackupSignal backup;
 
-	private int mutationCount;
+	private final AtomicInteger mutationCount;
+	private boolean checkpointRequested = false;
 
-	public KVSharedState(StorageManager manager) throws IOException {
-		Map<String, Entry> store = new ConcurrentHashMap<>();
+	public KVSharedState(StorageManager manager, BackupSignal backup) throws IOException {
 		Map<String, String> snapshot = manager.loadSnapshot();
-
-		for (Map.Entry<String, String> entry : snapshot.entrySet()) {
-			Entry e = new Entry();
-			e.value = entry.getValue();
-			store.put(entry.getKey(), e);
-		}
+		Map<String, String> store = new ConcurrentHashMap<>(snapshot);
 
 		this.manager= manager;
 		this.store = store;
-		this.mutationCount = manager.loadLog().size();
+		this.backup = backup;
 
 		commands.put("PUT", (tokens) ->{
 			String key = tokens[1];
@@ -32,25 +33,24 @@ public class KVSharedState {
 
 			Response response;
 
-			Entry entry = store.get(key);
+			String entry = store.get(key);
 
-			if(entry.value != null) {
+			if(entry != null) {
 				response = new Response(ExecutionStatus.OK_UPDATED);
 			} else {
 				response = new Response(ExecutionStatus.OK_ADDED);
+
 			}
 
-
-			entry.value = value;
-
+			store.put(key, value);
 			return response;
 		});
 
 		commands.put("GET", (tokens) ->{
 			String key = tokens[1];
-			Entry status = store.get(key);
-			if(status != null) {
-				return new Response(ExecutionStatus.OK_SUCCESS, status.value);
+			String value = store.get(key);
+			if(value != null) {
+				return new Response(ExecutionStatus.OK_SUCCESS, value);
 			} else {
 				return new Response(ExecutionStatus.ERR_NOT_FOUND);
 			}
@@ -59,7 +59,7 @@ public class KVSharedState {
 
 		commands.put("DELETE", (tokens) ->{
 			String key = tokens[1];
-			Entry status = store.remove(key);
+			String status = store.remove(key);
 
 			if(status != null) {
 				return new Response(ExecutionStatus.OK_DELETED);
@@ -68,36 +68,38 @@ public class KVSharedState {
 			}
 		});
 
+		this.mutationCount = new AtomicInteger(initialiseState());
+
 	}
 
-	public synchronized boolean acquireLock(String key, String type, String command) throws InterruptedException {
+	private int initialiseState() throws IOException {
+		List<String[]> operations = manager.loadLog();
+
+		for (String[] tokens : operations) {
+			executeCommand(tokens);
+		}
+
+		return operations.size();
+	}
+
+	public synchronized boolean acquireLock(String key, String command) throws InterruptedException {
 		Thread me = Thread.currentThread();
 
 		while (true) {
 
-			Entry entry = store.get(key);
+			String value = store.get(key);
 
 			// Key currently doesn't exist
-			if (entry == null) {
-
-				// PUT is allowed to create it
-				if (command.equalsIgnoreCase("PUT")) {
-					entry = new Entry();
-					entry.writer = true;
-					store.put(key, entry);
-
-					System.out.println(me.getName() + " created and locked " + key);
-					return true;
-				}
-
-				// GET / DELETE on nonexistent key
+			if (value == null && !command.equalsIgnoreCase("PUT")) {
 				return false;
 			}
 
-			if (type.equalsIgnoreCase("writer")) {
+			LockState lock = locks.computeIfAbsent(key, k -> new LockState());
 
-				if (!entry.writer && entry.readers == 0) {
-					entry.writer = true;
+			if (command.equalsIgnoreCase("PUT") || command.equalsIgnoreCase("DELETE")) {
+
+				if (!lock.writer && lock.readers == 0) {
+					lock.writer = true;
 
 					System.out.println(me.getName() + " got a " + key + " writer lock!");
 					return true;
@@ -105,8 +107,8 @@ public class KVSharedState {
 
 			} else {
 
-				if (!entry.writer) {
-					entry.readers++;
+				if (!lock.writer) {
+					lock.readers++;
 
 					System.out.println(me.getName() + " got a " + key + " reader lock!");
 					return true;
@@ -121,32 +123,39 @@ public class KVSharedState {
 		}
 	}
 
-	public synchronized void releaseLock(String key, String type) {
-		Entry entry = store.get(key);
+	public synchronized void releaseLock(String key, String command) {
+		LockState lock = locks.get(key);
 
-		if (entry == null) {
+		if (lock == null) {
 			notifyAll(); 
 			return;
 		}
 
-		if (type.equalsIgnoreCase("writer")) {
-			entry.writer = false;
+		if (command.equalsIgnoreCase("GET")) {
+			lock.readers--;
 		} else {
-			entry.readers--;
+			lock.writer = false;
 		}
 
 		notifyAll(); 
 	}
 
+	private Response executeCommand(String[] tokens) {
+		Command cmd = commands.get(tokens[0].toUpperCase());
+		return cmd.execute(tokens);
+	}
+
 	public Response processCommand(String[] tokens) throws IOException {
 		if (!tokens[0].equalsIgnoreCase("GET")) {
-			mutationCount++;
 			manager.appendOperation(tokens);
+			mutationCount.incrementAndGet();
 		}
-		
-		Command cmd = commands.get(tokens[0].toUpperCase());
 
-		return cmd.execute(tokens);
+		if(mutationCount.intValue() >= 1000) {
+			requestCheckpoint();
+		}
+
+		return executeCommand(tokens);
 	}
 
 	public boolean validateInput(String[] input) {
@@ -163,5 +172,52 @@ public class KVSharedState {
 		return false;
 	}
 
+	public void createSnapshot() throws IOException {
+		manager.writeSnapshot(store);
+	}
+
+	public synchronized void enterGlobalState() {
+		while(checkpointRequested) {
+			try {
+				wait();
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+				return;
+			}
+		}
+		globalLock.readLock().lock();
+	}
+
+	public void leaveGlobalState() {
+		globalLock.readLock().unlock();
+	}
+
+	public void enterGlobalStateForBackup() {
+		globalLock.writeLock().lock();
+	}
+
+	// Called by the Worker Thread when the backup is finished
+	public void leaveGlobalStateFromBackup() {
+		globalLock.writeLock().unlock();
+	}
+
+	public synchronized void requestCheckpoint() {
+		if(!checkpointRequested) {
+			checkpointRequested = true;
+			backup.triggerSignal();
+		}
+	}
+
+
+	public synchronized void completeCheckpoint() {
+		mutationCount.set(0);
+		checkpointRequested = false;
+		notifyAll();
+	}
+	
+	public synchronized void failCheckpoint() {
+	    checkpointRequested = false;
+	    notifyAll();
+	}
 
 }
