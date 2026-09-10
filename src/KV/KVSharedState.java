@@ -151,7 +151,7 @@ public class KVSharedState {
 			mutationCount.incrementAndGet();
 		}
 
-		if(mutationCount.intValue() >= 1000) {
+		if(mutationCount.intValue() >= 3) {
 			requestCheckpoint();
 		}
 
