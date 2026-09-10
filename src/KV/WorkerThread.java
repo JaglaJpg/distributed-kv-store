@@ -1,14 +1,10 @@
 package kv;
 
-import java.io.IOException;
-
 public class WorkerThread extends Thread {
-	private KVSharedState mySharedState;
-	private BackupSignal backup;
+	private StateManager stateManager;
 	
-	public WorkerThread(KVSharedState mySharedState, BackupSignal backup) {
-		this.mySharedState = mySharedState;
-		this.backup = backup;
+	public WorkerThread(StateManager stateManager) {
+		this.stateManager = stateManager;
 		setName("My-System-Worker"); 
 		setDaemon(true);
 	}
@@ -16,21 +12,8 @@ public class WorkerThread extends Thread {
 	@Override
 	public void run() {
 		while (true) {
-			backup.waitForSignal();
-			
-			mySharedState.enterGlobalStateForBackup();
-			
-			try {
-				mySharedState.createSnapshot();
-				mySharedState.completeCheckpoint();
-				
-			} catch (IOException e) {
-				e.printStackTrace();
-				mySharedState.failCheckpoint();
-				
-			} finally {
-				mySharedState.leaveGlobalStateFromBackup();
-			}
+			stateManager.waitForCheckpointSignal();
+			stateManager.performCheckpoint();
 		}
 	}
 }

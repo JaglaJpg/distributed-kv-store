@@ -12,21 +12,8 @@ public class KVSharedState {
 	private Map<String, String> store;
 	private final Map<String, Command> commands = new HashMap<>();
 	private Map<String, LockState> locks = new HashMap<>();
-	private final StorageManager manager;
-	private final ReentrantReadWriteLock globalLock = new ReentrantReadWriteLock(true);
-	private BackupSignal backup;
 
-	private final AtomicInteger mutationCount;
-	private boolean checkpointRequested = false;
-
-	public KVSharedState(StorageManager manager, BackupSignal backup) throws IOException {
-		Map<String, String> snapshot = manager.loadSnapshot();
-		Map<String, String> store = new ConcurrentHashMap<>(snapshot);
-
-		this.manager= manager;
-		this.store = store;
-		this.backup = backup;
-
+	public KVSharedState() throws IOException {
 		commands.put("PUT", (tokens) ->{
 			String key = tokens[1];
 			String value = tokens[2];
@@ -67,13 +54,10 @@ public class KVSharedState {
 				return new Response(ExecutionStatus.ERR_NOT_FOUND);
 			}
 		});
-
-		this.mutationCount = new AtomicInteger(initialiseState());
-
 	}
 
-	private int initialiseState() throws IOException {
-		List<String[]> operations = manager.loadLog();
+	int initialiseState(Map<String, String> snapshot, List<String[]> operations) throws IOException {
+		this.store = new ConcurrentHashMap<>(snapshot);
 
 		for (String[] tokens : operations) {
 			executeCommand(tokens);
@@ -140,22 +124,9 @@ public class KVSharedState {
 		notifyAll(); 
 	}
 
-	private Response executeCommand(String[] tokens) {
+	public Response executeCommand(String[] tokens) throws IOException {
 		Command cmd = commands.get(tokens[0].toUpperCase());
 		return cmd.execute(tokens);
-	}
-
-	public Response processCommand(String[] tokens) throws IOException {
-		if (!tokens[0].equalsIgnoreCase("GET")) {
-			manager.appendOperation(tokens);
-			mutationCount.incrementAndGet();
-		}
-
-		if(mutationCount.intValue() >= 3) {
-			requestCheckpoint();
-		}
-
-		return executeCommand(tokens);
 	}
 
 	public boolean validateInput(String[] input) {
@@ -172,52 +143,8 @@ public class KVSharedState {
 		return false;
 	}
 
-	public void createSnapshot() throws IOException {
-		manager.writeSnapshot(store);
-	}
-
-	public synchronized void enterGlobalState() {
-		while(checkpointRequested) {
-			try {
-				wait();
-			} catch (InterruptedException e) {
-				Thread.currentThread().interrupt();
-				return;
-			}
-		}
-		globalLock.readLock().lock();
-	}
-
-	public void leaveGlobalState() {
-		globalLock.readLock().unlock();
-	}
-
-	public void enterGlobalStateForBackup() {
-		globalLock.writeLock().lock();
-	}
-
-	// Called by the Worker Thread when the backup is finished
-	public void leaveGlobalStateFromBackup() {
-		globalLock.writeLock().unlock();
-	}
-
-	public synchronized void requestCheckpoint() {
-		if(!checkpointRequested) {
-			checkpointRequested = true;
-			backup.triggerSignal();
-		}
-	}
-
-
-	public synchronized void completeCheckpoint() {
-		mutationCount.set(0);
-		checkpointRequested = false;
-		notifyAll();
-	}
-	
-	public synchronized void failCheckpoint() {
-	    checkpointRequested = false;
-	    notifyAll();
+	public Map<String, String> copyStore(){
+		return new HashMap<>(store);
 	}
 
 }

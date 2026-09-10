@@ -12,10 +12,8 @@ public class KVServer {
 		ServerSocket kvServerSocket = null;
 		boolean listening = true;
 		
-		BackupSignal backup = new BackupSignal();
-		StorageManager manager = new StorageManager();
-		KVSharedState ourSharedState = new KVSharedState(manager, backup);
-		new WorkerThread(ourSharedState, backup).start();
+		StateManager stateManager = new StateManager();
+		new WorkerThread(stateManager).start();
 
 		try {
 			kvServerSocket = new ServerSocket(DEFAULT_SERVER_PORT);
@@ -27,7 +25,7 @@ public class KVServer {
 		System.out.println(DEFAULT_SERVER_NAME + " started");
 		
 		while (listening) {
-			new KVThread(kvServerSocket.accept(), ourSharedState).start();
+			new KVThread(kvServerSocket.accept(), stateManager).start();
 			System.out.println("New " + DEFAULT_SERVER_NAME + " thread started");
 		}
 		kvServerSocket.close();

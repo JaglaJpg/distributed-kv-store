@@ -5,5 +5,6 @@ public enum ExecutionStatus {
 	OK_ADDED,
 	OK_UPDATED,
 	OK_DELETED,
-	ERR_NOT_FOUND
+	ERR_NOT_FOUND,
+	INVALID_COMMAND
 }
