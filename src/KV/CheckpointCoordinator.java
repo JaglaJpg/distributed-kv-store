@@ -72,11 +72,11 @@ public class CheckpointCoordinator {
 		globalLock.readLock().unlock();
 	}
 
-	public void enterCheckpoint() {
+	public void enterExclusiveOperation() {
 		globalLock.writeLock().lock();
 	}
 
-	public void leaveCheckpoint() {
+	public void leaveExclusiveOperation() {
 		globalLock.writeLock().unlock();
 	}
 	

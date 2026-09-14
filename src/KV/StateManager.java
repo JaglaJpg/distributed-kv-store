@@ -19,16 +19,20 @@ public class StateManager {
 		
 	}
 
-
 	public Response handleCommand(String[] tokens) throws InterruptedException, IOException {
-		if(!state.validateInput(tokens)) {
+		if (!state.validateInput(tokens)) {
 			return new Response(ExecutionStatus.INVALID_COMMAND);
 		}
 		
-		Response response = null;
 		String command = tokens[0];
-		String key = tokens[1];
 		
+		if (command.equalsIgnoreCase("RESET")) {
+			return handleReset(tokens);
+		}
+		
+		Response response = null;
+		String key = tokens[1];
+	
 		boolean isMutation = !command.equalsIgnoreCase("GET");
 		
 		checkpoint.enterOperation();
@@ -68,7 +72,7 @@ public class StateManager {
 	public void performCheckpoint()  {
 		checkpoint.requestCheckpoint();
 		
-		checkpoint.enterCheckpoint();
+		checkpoint.enterExclusiveOperation();
 		
 		try {
 			Map<String, String> storeCopy = state.copyStore();
@@ -80,7 +84,24 @@ public class StateManager {
 			checkpoint.finishCheckpoint(false);
 		    
 		} finally {
-			checkpoint.leaveCheckpoint();
+			checkpoint.leaveExclusiveOperation();
 		}
+	}
+	
+	public Response handleReset(String[] tokens) throws IOException {
+		Response response;
+		checkpoint.enterExclusiveOperation();
+		
+		try {
+			storage.appendOperation(tokens);
+			storage.resetPersistance();
+			checkpoint.resetMutationCount();
+			response = state.executeCommand(tokens);
+			
+		} finally {
+			checkpoint.leaveExclusiveOperation();
+		}
+		
+		return response;
 	}
 }

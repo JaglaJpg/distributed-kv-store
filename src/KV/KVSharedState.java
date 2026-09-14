@@ -1,12 +1,11 @@
 package kv;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public class KVSharedState {
 	private Map<String, String> store;
@@ -54,16 +53,49 @@ public class KVSharedState {
 				return new Response(ExecutionStatus.ERR_NOT_FOUND);
 			}
 		});
+		
+		commands.put("RESET", (tokens) ->{
+			this.store = new ConcurrentHashMap<>();
+			
+			return new Response(ExecutionStatus.OK_SUCCESS, "Successfully Reset Data Store");
+		});
 	}
 
-	int initialiseState(Map<String, String> snapshot, List<String[]> operations) throws IOException {
-		this.store = new ConcurrentHashMap<>(snapshot);
+	int initialiseState(Snapshot snapshot, List<String[]> operations) throws IOException {
+	    long latestApplied = snapshot.getCheckNum();
+	    long resetCheckNum = 0;
 
-		for (String[] tokens : operations) {
-			executeCommand(tokens);
-		}
+	    this.store = new ConcurrentHashMap<>(snapshot.getSnapshot());
 
-		return operations.size();
+	    for (int i = operations.size() - 1; i >= 0; i--) {
+	        String[] op = operations.get(i);
+	        long opNum = Long.parseLong(op[0]);
+
+	        if (opNum <= latestApplied) {
+	            break;
+	        }
+
+	        if (op[1].equalsIgnoreCase("RESET")) {
+	            this.store = new ConcurrentHashMap<>();
+	            resetCheckNum = opNum;
+	            break;
+	        }
+	    }
+
+	    long recoveryBoundary = Math.max(latestApplied, resetCheckNum);
+
+	    int replayedOperations = 0;
+
+	    for (String[] tokens : operations) {
+	        if (Long.parseLong(tokens[0]) <= recoveryBoundary) {
+	            continue;
+	        }
+
+	        executeCommand(Arrays.copyOfRange(tokens, 1, tokens.length));
+	        replayedOperations++;
+	    }
+
+	    return replayedOperations;
 	}
 
 	public synchronized boolean acquireLock(String key, String command) throws InterruptedException {
@@ -138,6 +170,8 @@ public class KVSharedState {
 			return input.length == 2;
 		} else if (input[0].equalsIgnoreCase("put")) {
 			return input.length == 3;
+		} else if (input[0].equalsIgnoreCase("reset")) {
+			return input.length == 1;
 		}
 
 		return false;
