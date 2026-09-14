@@ -1,7 +1,6 @@
 package kv;
 
 import java.io.BufferedReader;
-import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -28,6 +27,7 @@ public class StorageManager {
 
 	public StorageManager() throws IOException {
 		Files.createDirectories(DATA_DIRECTORY);
+		Files.deleteIfExists(TEMP_SNAPSHOT_PATH);
 
 		if (Files.notExists(LOG_PATH)) {
 			Files.createFile(LOG_PATH);
@@ -37,18 +37,33 @@ public class StorageManager {
 		
 		String content = new String(bytes, StandardCharsets.UTF_8);
 
-		if (!content.endsWith(System.lineSeparator())) {
-			int lastSeparator = content.lastIndexOf(System.lineSeparator());
+		if (!content.isEmpty() && !content.endsWith(System.lineSeparator())) {
+		    int lastSeparator = content.lastIndexOf(System.lineSeparator());
 
-			if (lastSeparator == -1) {
-			    // entire WAL is just one incomplete record
-			    Files.writeString(LOG_PATH, "");
-			} else {
-			    String validPart =
-			        content.substring(0, lastSeparator + System.lineSeparator().length());
+		    String validPart = "";
 
-			    Files.writeString(LOG_PATH, validPart);
-			}
+		    if (lastSeparator != -1) {
+		        validPart =
+		            content.substring(
+		                0,
+		                lastSeparator + System.lineSeparator().length()
+		            );
+		    }
+
+		    try (FileChannel channel = FileChannel.open(
+		            LOG_PATH,
+		            StandardOpenOption.WRITE,
+		            StandardOpenOption.TRUNCATE_EXISTING)) {
+
+		        ByteBuffer buffer =
+		            ByteBuffer.wrap(validPart.getBytes(StandardCharsets.UTF_8));
+
+		        while (buffer.hasRemaining()) {
+		            channel.write(buffer);
+		        }
+
+		        channel.force(true);
+		    }
 		}
 
 		long snapshotNum = 0;
@@ -82,36 +97,6 @@ public class StorageManager {
 		this.checkNum = Math.max(snapshotNum, logNum);
 	}
 
-	public synchronized void appendOperation(String[] tokens) throws IOException {
-		long operationNum = ++checkNum;
-
-		String operation = operationNum + " " + tokens[0] + " ";
-
-		operation += tokens[1].length() + ":" + tokens[1];
-
-		if (tokens[0].equalsIgnoreCase("PUT")) {
-			operation += tokens[2].length() + ":" + tokens[2];
-		}
-
-		try (FileChannel channel = FileChannel.open(
-				LOG_PATH,
-				StandardOpenOption.CREATE,
-				StandardOpenOption.WRITE,
-				StandardOpenOption.APPEND)) {
-
-			String record = operation + System.lineSeparator();
-
-			ByteBuffer buffer = 
-					ByteBuffer.wrap(record.getBytes(StandardCharsets.UTF_8));
-
-			while (buffer.hasRemaining()) {
-				channel.write(buffer);
-			}
-
-			channel.force(true);
-
-		}
-	}
 
 	public Snapshot loadSnapshot() throws IOException {
 		Map<String, String> snapshotMap = new HashMap<>();
@@ -158,64 +143,125 @@ public class StorageManager {
 		return new Snapshot(snapshotMap, latestApplied);
 	}
 
+	private record ParsedField(String value, int nextIndex) {}
+
+	private ParsedField parseField(String line, int index) {
+	    int colon = line.indexOf(':', index);
+	    int length = Integer.parseInt(line.substring(index, colon));
+
+	    int valueStart = colon + 1;
+	    int valueEnd = valueStart + length;
+
+	    return new ParsedField(
+	            line.substring(valueStart, valueEnd),
+	            valueEnd
+	    );
+	}
+
 	public List<String[]> loadLog() throws IOException {
-		List<String[]> operations = new ArrayList<>();
+	    List<String[]> operations = new ArrayList<>();
 
-		try (FileReader fr = new FileReader(LOG_PATH.toFile());
-				BufferedReader reader = new BufferedReader(fr)) {
+	    try (BufferedReader reader = Files.newBufferedReader(LOG_PATH)) {
+	        String line;
 
-			String line;
+	        while ((line = reader.readLine()) != null) {
+	            if (line.isBlank()) {
+	                continue;
+	            }
 
-			while ((line = reader.readLine()) != null) {
+	            int index = 0;
 
-				if (line.trim().isEmpty()) {
-					continue;
-				}
+	            int checkNumSpace = line.indexOf(' ', index);
+	            String operationNum = line.substring(index, checkNumSpace);
+	            index = checkNumSpace + 1;
 
-				int index = 0;
+	            int commandSpace = line.indexOf(' ', index);
 
-				int checkNumSpace = line.indexOf(' ', index);
-				String operationNum = line.substring(index, checkNumSpace);
-				index = checkNumSpace + 1;
+	            String command;
 
-				int commandSpace = line.indexOf(' ', index);
-				String command = line.substring(index, commandSpace);
-				index = commandSpace + 1;
+	            if (commandSpace == -1) {
+	                command = line.substring(index);
+	            } else {
+	                command = line.substring(index, commandSpace);
+	                index = commandSpace + 1;
+	            }
 
-				int colon = line.indexOf(':', index);
-				int keyLength = Integer.parseInt(line.substring(index, colon));
-				index = colon + 1;
+	            switch (command.toUpperCase()) {
+	                case "RESET" -> {
+	                    operations.add(new String[] {
+	                            operationNum,
+	                            command
+	                    });
+	                }
 
-				String key = line.substring(index, index + keyLength);
-				index += keyLength;
+	                case "DELETE" -> {
+	                    ParsedField key = parseField(line, index);
 
-				if (command.equalsIgnoreCase("PUT")) {
+	                    operations.add(new String[] {
+	                            operationNum,
+	                            command,
+	                            key.value()
+	                    });
+	                }
 
-					colon = line.indexOf(':', index);
-					int valueLength = Integer.parseInt(line.substring(index, colon));
-					index = colon + 1;
+	                case "PUT" -> {
+	                    ParsedField key = parseField(line, index);
+	                    ParsedField value = parseField(line, key.nextIndex());
 
-					String value = line.substring(index, index + valueLength);
+	                    operations.add(new String[] {
+	                            operationNum,
+	                            command,
+	                            key.value(),
+	                            value.value()
+	                    });
+	                }
+	            }
+	        }
+	    }
 
-					operations.add(new String[] {
-							operationNum,
-							command,
-							key,
-							value
-					});
+	    return operations;
+	}
 
-				} else if (command.equalsIgnoreCase("DELETE")) {
+	public synchronized void appendOperation(String[] tokens) throws IOException {
+	    long operationNum = ++checkNum;
+	    String command = tokens[0].toUpperCase();
 
-					operations.add(new String[] {
-							operationNum,
-							command,
-							key
-					});
-				}
-			}
-		}
+	    String operation = operationNum + " " + command;
 
-		return operations;
+	    switch (command) {
+	        case "PUT" -> {
+	            operation += " "
+	                    + tokens[1].length() + ":" + tokens[1]
+	                    + tokens[2].length() + ":" + tokens[2];
+	        }
+
+	        case "DELETE" -> {
+	            operation += " "
+	                    + tokens[1].length() + ":" + tokens[1];
+	        }
+
+	        case "RESET" -> {
+	            // no payload
+	        }
+	    }
+
+	    String record = operation + System.lineSeparator();
+
+	    try (FileChannel channel = FileChannel.open(
+	            LOG_PATH,
+	            StandardOpenOption.CREATE,
+	            StandardOpenOption.WRITE,
+	            StandardOpenOption.APPEND)) {
+
+	        ByteBuffer buffer =
+	                ByteBuffer.wrap(record.getBytes(StandardCharsets.UTF_8));
+
+	        while (buffer.hasRemaining()) {
+	            channel.write(buffer);
+	        }
+
+	        channel.force(true);
+	    }
 	}
 
 	public void writeSnapshot(Map<String, String> data) throws IOException {
@@ -268,14 +314,15 @@ public class StorageManager {
 	}
 
 	public void resetPersistance() throws IOException {
-		File snapshot = SNAPSHOT_PATH.toFile();
-		snapshot.delete();
+	    Files.deleteIfExists(SNAPSHOT_PATH);
 
-		Files.writeString(
-				LOG_PATH,
-				"",
-				StandardOpenOption.TRUNCATE_EXISTING
-				);
+	    try (FileChannel channel = FileChannel.open(
+	            LOG_PATH,
+	            StandardOpenOption.WRITE)) {
+
+	        channel.truncate(0);
+	        channel.force(true);
+	    }
 	}
 
 }
