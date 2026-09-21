@@ -1,10 +1,14 @@
-package kv;
+package kv.server;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.Socket;
+
+import kv.protocol.ExecutionStatus;
+import kv.protocol.Response;
+import kv.state.StateManager;
 
 public class KVThread extends Thread {
 	private Socket kvSocket = null;
@@ -39,9 +43,11 @@ public class KVThread extends Thread {
 						
 					} else {
 						String action = tokens[0];
-						String key = tokens[1];
 						
-						if (action.equals("put")) {
+						if (action.equalsIgnoreCase("reset")) {
+							out.println(response.getPayload());
+						}else if (action.equalsIgnoreCase("put")) {
+							String key = tokens[1];
 						    String value = tokens[2];
 						    if (status == ExecutionStatus.OK_ADDED) { 
 						        out.println("Successfully added key '" + key + "' with value '" + value + "'");
@@ -49,14 +55,16 @@ public class KVThread extends Thread {
 						        out.println("Successfully updated key '" + key + "' to new value '" + value + "'");
 						    }
 						} 
-						else if (action.equals("delete")) {
+						else if (action.equalsIgnoreCase("delete")) {
+							String key = tokens[1];
 						    if (status == ExecutionStatus.OK_DELETED) { 
 						        out.println("Successfully deleted key '" + key + "'");
 						    } else if (status == ExecutionStatus.ERR_NOT_FOUND) { 
 						        out.println("Error: Could not delete because key '" + key + "' does not exist");
 						    }
 						} 
-						else if (action.equals("get")) {
+						else if (action.equalsIgnoreCase("get")) {
+							String key = tokens[1];
 						    if (status != ExecutionStatus.ERR_NOT_FOUND) { 
 						    	out.println("Value for '" + key + "': " + response.getPayload());
 						    } else {

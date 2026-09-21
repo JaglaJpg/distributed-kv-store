@@ -1,4 +1,4 @@
-package kv;
+package kv.storage;
 
 import java.io.BufferedReader;
 import java.io.FileReader;
@@ -240,9 +240,6 @@ public class StorageManager {
 	                    + tokens[1].length() + ":" + tokens[1];
 	        }
 
-	        case "RESET" -> {
-	            // no payload
-	        }
 	    }
 
 	    String record = operation + System.lineSeparator();

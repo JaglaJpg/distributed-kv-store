@@ -1,7 +1,12 @@
-package kv;
+package kv.state;
 
 import java.io.IOException;
 import java.util.Map;
+
+import kv.protocol.ExecutionStatus;
+import kv.protocol.Response;
+import kv.storage.CheckpointCoordinator;
+import kv.storage.StorageManager;
 
 public class StateManager {
 	private final StorageManager storage;

@@ -1,4 +1,4 @@
-package kv;
+package kv.state;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -6,6 +6,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+
+import kv.protocol.Command;
+import kv.protocol.ExecutionStatus;
+import kv.protocol.Response;
+import kv.storage.Snapshot;
 
 public class KVSharedState {
 	private Map<String, String> store;

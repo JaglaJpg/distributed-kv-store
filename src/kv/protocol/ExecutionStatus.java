@@ -1,4 +1,4 @@
-package kv;
+package kv.protocol;
 
 public enum ExecutionStatus {
 	OK_SUCCESS,
