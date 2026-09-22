@@ -4,7 +4,10 @@ import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 
+import kv.cluster.OperationProcessor;
+import kv.cluster.ReplicationState;
 import kv.state.StateManager;
+import kv.storage.StorageManager;
 
 public class KVNodeB {
 	private static final String NODE_ID = "Balthasar-2";
@@ -20,7 +23,22 @@ public class KVNodeB {
 		ServerSocket kvServerSocket = null;
 		boolean listening = true;
 		
-		StateManager stateManager = new StateManager();
+		StorageManager storageManager = new StorageManager();
+		
+		StateManager stateManager = new StateManager(storageManager);
+
+		 // IF you expose it this way
+
+		Long[] savedRepState = storageManager.loadRepState();
+		ReplicationState repState = new ReplicationState(savedRepState);
+
+		OperationProcessor operationProcessor =
+		        new OperationProcessor(
+		            repState,
+		            storageManager,
+		            stateManager
+		        );
+
 		new WorkerThread(stateManager).start();
 
 		try {
@@ -64,7 +82,7 @@ public class KVNodeB {
 		}).start();
 		
 		while (listening) {
-			new KVThread(kvServerSocket.accept(), stateManager).start();
+			new KVClientThread(kvServerSocket.accept(), stateManager, operationProcessor).start();
 			System.out.println("New " + NODE_ID + " thread started");
 		}
 		kvServerSocket.close();

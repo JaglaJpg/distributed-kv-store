@@ -166,21 +166,6 @@ public class KVSharedState {
 		return cmd.execute(tokens);
 	}
 
-	public boolean validateInput(String[] input) {
-		if (input == null || input.length == 0) {
-			return false;
-		}
-
-		if (input[0].equalsIgnoreCase("delete") || input[0].equalsIgnoreCase("get")) {
-			return input.length == 2;
-		} else if (input[0].equalsIgnoreCase("put")) {
-			return input.length == 3;
-		} else if (input[0].equalsIgnoreCase("reset")) {
-			return input.length == 1;
-		}
-
-		return false;
-	}
 
 	public Map<String, String> copyStore(){
 		return new HashMap<>(store);

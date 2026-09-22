@@ -6,8 +6,11 @@ import java.net.Socket;
 
 import kv.cluster.ClusterReaderThread;
 import kv.cluster.ClusterWriterThread;
+import kv.cluster.OperationProcessor;
 import kv.cluster.PeerConnection;
+import kv.cluster.ReplicationState;
 import kv.state.StateManager;
+import kv.storage.StorageManager;
 
 public class KVNodeA {
 	private static final String NODE_ID = "Melchior-1";
@@ -23,7 +26,22 @@ public class KVNodeA {
 		ServerSocket kvServerSocket = null;
 		boolean listening = true;
 		
-		StateManager stateManager = new StateManager();
+		StorageManager storageManager = new StorageManager();
+		
+		StateManager stateManager = new StateManager(storageManager);
+
+		 // IF you expose it this way
+
+		Long[] savedRepState = storageManager.loadRepState();
+		ReplicationState repState = new ReplicationState(savedRepState);
+
+		OperationProcessor operationProcessor =
+		        new OperationProcessor(
+		            repState,
+		            storageManager,
+		            stateManager
+		        );
+
 		new WorkerThread(stateManager).start();
 
 		try {
@@ -71,7 +89,7 @@ public class KVNodeA {
 		}).start();
 		
 		while (listening) {
-			new KVThread(kvServerSocket.accept(), stateManager).start();
+			new KVClientThread(kvServerSocket.accept(), stateManager, operationProcessor).start();
 			System.out.println("New " + NODE_ID + " thread started");
 		}
 		kvServerSocket.close();
