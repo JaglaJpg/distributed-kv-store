@@ -18,96 +18,125 @@ import java.util.regex.Pattern;
 
 public class StorageManager {
 
-	private static final Path DATA_DIRECTORY = Path.of("data");
-	private static final Path LOG_PATH = DATA_DIRECTORY.resolve("operations.log");
-	private static final Path SNAPSHOT_PATH = DATA_DIRECTORY.resolve("snapshot.dat");
-	private static final Path TEMP_SNAPSHOT_PATH = DATA_DIRECTORY.resolve("snapshot.tmp");
-	private static final Path REP_STATE_PATH = DATA_DIRECTORY.resolve("replication.meta");
+    private static final Path DATA_DIRECTORY = Path.of("data");
 
-	private long checkNum;
+    private static final String LOG_FILE = "operations.log";
+    private static final String SNAPSHOT_FILE = "snapshot.dat";
+    private static final String TEMP_SNAPSHOT_FILE = "snapshot.tmp";
+    private static final String REP_STATE_FILE = "replication.meta";
 
-	public StorageManager() throws IOException {
-		Files.createDirectories(DATA_DIRECTORY);
-		Files.deleteIfExists(TEMP_SNAPSHOT_PATH);
+    private final Path nodeDir;
+    private final Path logPath;
+    private final Path snapshotPath;
+    private final Path tempSnapshotPath;
+    private final Path repStatePath;
 
-		if (Files.notExists(LOG_PATH)) {
-			Files.createFile(LOG_PATH);
-		}
+    private long checkNum;
 
-		byte[] bytes = Files.readAllBytes(LOG_PATH);
+    public StorageManager(String nodeId) throws IOException {
 
-		String content = new String(bytes, StandardCharsets.UTF_8);
+        this.nodeDir = DATA_DIRECTORY.resolve(nodeId);
 
-		if (!content.isEmpty() && !content.endsWith(System.lineSeparator())) {
-			int lastSeparator = content.lastIndexOf(System.lineSeparator());
+        this.logPath = nodeDir.resolve(LOG_FILE);
+        this.snapshotPath = nodeDir.resolve(SNAPSHOT_FILE);
+        this.tempSnapshotPath = nodeDir.resolve(TEMP_SNAPSHOT_FILE);
+        this.repStatePath = nodeDir.resolve(REP_STATE_FILE);
 
-			String validPart = "";
+        Files.createDirectories(nodeDir);
+        Files.deleteIfExists(tempSnapshotPath);
 
-			if (lastSeparator != -1) {
-				validPart =
-						content.substring(
-								0,
-								lastSeparator + System.lineSeparator().length()
-								);
-			}
+        if (Files.notExists(logPath)) {
+            Files.createFile(logPath);
+        }
 
-			try (FileChannel channel = FileChannel.open(
-					LOG_PATH,
-					StandardOpenOption.WRITE,
-					StandardOpenOption.TRUNCATE_EXISTING)) {
+        byte[] bytes = Files.readAllBytes(logPath);
 
-				ByteBuffer buffer =
-						ByteBuffer.wrap(validPart.getBytes(StandardCharsets.UTF_8));
+        String content = new String(bytes, StandardCharsets.UTF_8);
 
-				while (buffer.hasRemaining()) {
-					channel.write(buffer);
-				}
+        if (!content.isEmpty()
+                && !content.endsWith(System.lineSeparator())) {
 
-				channel.force(true);
-			}
-		}
+            int lastSeparator =
+                    content.lastIndexOf(System.lineSeparator());
 
-		long snapshotNum = 0;
-		long logNum = 0;
+            String validPart = "";
 
-		if (Files.exists(SNAPSHOT_PATH)) {
-			try (BufferedReader br = Files.newBufferedReader(SNAPSHOT_PATH)) {
-				String firstLine = br.readLine();
+            if (lastSeparator != -1) {
+                validPart =
+                        content.substring(
+                                0,
+                                lastSeparator
+                                + System.lineSeparator().length()
+                        );
+            }
 
-				if (firstLine != null) {
-					snapshotNum = Long.parseLong(
-							Pattern.compile(" ").splitAsStream(firstLine).toList().getLast()
-							);
-				}
-			}
-		}
+            try (FileChannel channel = FileChannel.open(
+                    logPath,
+                    StandardOpenOption.WRITE,
+                    StandardOpenOption.TRUNCATE_EXISTING)) {
 
-		try (BufferedReader br = Files.newBufferedReader(LOG_PATH)) {
-			String line;
-			String lastLine = null;
+                ByteBuffer buffer =
+                        ByteBuffer.wrap(
+                                validPart.getBytes(StandardCharsets.UTF_8)
+                        );
 
-			while ((line = br.readLine()) != null) {
-				lastLine = line;
-			}
+                while (buffer.hasRemaining()) {
+                    channel.write(buffer);
+                }
 
-			if (lastLine != null) {
-				logNum = Long.parseLong(lastLine.split(" ")[0]);
-			}
-		}
+                channel.force(true);
+            }
+        }
 
-		this.checkNum = Math.max(snapshotNum, logNum);
-	}
+        long snapshotNum = 0;
+        long logNum = 0;
+
+        if (Files.exists(snapshotPath)) {
+            try (BufferedReader br =
+                    Files.newBufferedReader(snapshotPath)) {
+
+                String firstLine = br.readLine();
+
+                if (firstLine != null) {
+                    snapshotNum = Long.parseLong(
+                            Pattern.compile(" ")
+                                    .splitAsStream(firstLine)
+                                    .toList()
+                                    .getLast()
+                    );
+                }
+            }
+        }
+
+        try (BufferedReader br =
+                Files.newBufferedReader(logPath)) {
+
+            String line;
+            String lastLine = null;
+
+            while ((line = br.readLine()) != null) {
+                lastLine = line;
+            }
+
+            if (lastLine != null) {
+                logNum =
+                        Long.parseLong(lastLine.split(" ")[0]);
+            }
+        }
+
+        this.checkNum = Math.max(snapshotNum, logNum);
+    }
 
 
 	public Snapshot loadSnapshot() throws IOException {
 		Map<String, String> snapshotMap = new HashMap<>();
 		Long latestApplied = 0l;
 
-		if (Files.notExists(SNAPSHOT_PATH)) {
+		if (Files.notExists(snapshotPath)) {
 			return new Snapshot(snapshotMap, 0l);
 		}
 
-		try (FileReader fr = new FileReader(SNAPSHOT_PATH.toFile());
+		try (FileReader fr = new FileReader(snapshotPath.toFile());
 				BufferedReader reader = new BufferedReader(fr)) {
 
 			String firstLine = reader.readLine();
@@ -162,7 +191,7 @@ public class StorageManager {
 	public List<String[]> loadLog() throws IOException {
 		List<String[]> operations = new ArrayList<>();
 
-		try (BufferedReader reader = Files.newBufferedReader(LOG_PATH)) {
+		try (BufferedReader reader = Files.newBufferedReader(logPath)) {
 			String line;
 
 			while ((line = reader.readLine()) != null) {
@@ -246,7 +275,7 @@ public class StorageManager {
 		String record = operation + System.lineSeparator();
 
 		try (FileChannel channel = FileChannel.open(
-				LOG_PATH,
+				logPath,
 				StandardOpenOption.CREATE,
 				StandardOpenOption.WRITE,
 				StandardOpenOption.APPEND)) {
@@ -264,7 +293,7 @@ public class StorageManager {
 
 	public void writeSnapshot(Map<String, String> data) throws IOException {
 		try (FileChannel channel = FileChannel.open(
-				TEMP_SNAPSHOT_PATH,
+				tempSnapshotPath,
 				StandardOpenOption.CREATE,
 				StandardOpenOption.WRITE,
 				StandardOpenOption.TRUNCATE_EXISTING )) {
@@ -297,14 +326,14 @@ public class StorageManager {
 		}
 
 		Files.move(
-				TEMP_SNAPSHOT_PATH, 
-				SNAPSHOT_PATH, 
+				tempSnapshotPath, 
+				snapshotPath, 
 				StandardCopyOption.REPLACE_EXISTING, 
 				StandardCopyOption.ATOMIC_MOVE
 				);
 
 		try (FileChannel channel = FileChannel.open(
-				LOG_PATH, 
+				logPath, 
 				StandardOpenOption.WRITE)) {
 			channel.truncate(0);
 			channel.force(true);
@@ -312,10 +341,10 @@ public class StorageManager {
 	}
 
 	public void resetPersistance() throws IOException {
-		Files.deleteIfExists(SNAPSHOT_PATH);
+		Files.deleteIfExists(snapshotPath);
 
 		try (FileChannel channel = FileChannel.open(
-				LOG_PATH,
+				logPath,
 				StandardOpenOption.WRITE)) {
 
 			channel.truncate(0);
@@ -326,7 +355,7 @@ public class StorageManager {
 	public void saveRepState(Long[] repState) throws IOException {
 
 		try (FileChannel channel = FileChannel.open(
-				REP_STATE_PATH,
+				repStatePath,
 				StandardOpenOption.CREATE,
 				StandardOpenOption.WRITE,
 				StandardOpenOption.TRUNCATE_EXISTING)) {
@@ -349,14 +378,14 @@ public class StorageManager {
 
 	public Long[] loadRepState() throws IOException {
 
-	    if (Files.notExists(REP_STATE_PATH)) {
+	    if (Files.notExists(repStatePath)) {
 	        return new Long[] {0L, 0L, 0L};
 	    }
 
 	    Long[] repState = new Long[3];
 	    int i = 0;
 
-	    try (BufferedReader reader = Files.newBufferedReader(REP_STATE_PATH)) {
+	    try (BufferedReader reader = Files.newBufferedReader(repStatePath)) {
 	        String line;
 
 	        while ((line = reader.readLine()) != null) {

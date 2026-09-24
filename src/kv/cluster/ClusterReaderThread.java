@@ -10,13 +10,38 @@ public class ClusterReaderThread extends Thread{
 	private Socket socket;
 	private BufferedReader in;
 	
-	public ClusterReaderThread(Socket socket, PeerConnection peer) throws IOException {
-		this.peer = peer;
-		this.socket = socket;
-		in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+	private ClusterManager clusterManager;
+
+	public ClusterReaderThread(
+	        Socket socket,
+	        PeerConnection peer,
+	        ClusterManager clusterManager) throws IOException {
+
+	    this.peer = peer;
+	    this.socket = socket;
+	    this.clusterManager = clusterManager;
+
+	    in = new BufferedReader(
+	            new InputStreamReader(socket.getInputStream())
+	    );
 	}
 	
 	public void run() {
+		String line;
+		try {
+			while ((line = in.readLine()) != null) {
+				clusterManager.handleMessage(line, peer);
+				
+			}
+			
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+			
+		} catch (InterruptedException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
 		
 	}
 

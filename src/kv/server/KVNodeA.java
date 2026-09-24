@@ -4,8 +4,10 @@ import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 
+import kv.cluster.ClusterManager;
 import kv.cluster.ClusterReaderThread;
 import kv.cluster.ClusterWriterThread;
+import kv.cluster.NodeRole;
 import kv.cluster.OperationProcessor;
 import kv.cluster.PeerConnection;
 import kv.cluster.ReplicationState;
@@ -26,7 +28,7 @@ public class KVNodeA {
 		ServerSocket kvServerSocket = null;
 		boolean listening = true;
 		
-		StorageManager storageManager = new StorageManager();
+		StorageManager storageManager = new StorageManager(NODE_ID);
 		
 		StateManager stateManager = new StateManager(storageManager);
 
@@ -40,6 +42,15 @@ public class KVNodeA {
 		            repState,
 		            storageManager,
 		            stateManager
+		        );
+		
+		
+		ClusterManager clusterManager =
+		        new ClusterManager(
+		                NODE_ID,
+		                NodeRole.LEADER,
+		                operationProcessor,
+		                repState
 		        );
 
 		new WorkerThread(stateManager).start();
@@ -62,8 +73,11 @@ public class KVNodeA {
 		            
 		            System.out.println("Previous node connected to " + NODE_ID);
 		            
-		            new ClusterReaderThread(prevNodeSocket, peer).start();
+		            new ClusterReaderThread(prevNodeSocket, peer, clusterManager).start();
 		            new ClusterWriterThread(prevNodeSocket, peer).start();
+		            
+		            clusterManager.sendHello(peer);
+		            
 		        }
 		    } catch (IOException e) {
 		        System.err.println("Cluster listener error on " + NODE_ID + ": " + e.getMessage());
@@ -79,8 +93,10 @@ public class KVNodeA {
 		            
 		            System.out.println(NODE_ID + " successfully connected to next node!");
 		            
-		            new ClusterReaderThread(nextNodeSocket, peer).start();
+		            new ClusterReaderThread(nextNodeSocket, peer, clusterManager).start();
 		            new ClusterWriterThread(nextNodeSocket, peer).start();
+		            
+		            clusterManager.sendHello(peer);
 		            
 		        } catch (IOException e) {
 		            try { Thread.sleep(2000); } catch (InterruptedException ignored) {}
@@ -89,7 +105,12 @@ public class KVNodeA {
 		}).start();
 		
 		while (listening) {
-			new KVClientThread(kvServerSocket.accept(), stateManager, operationProcessor).start();
+			new KVClientThread(
+			        kvServerSocket.accept(),
+			        stateManager,
+			        operationProcessor,
+			        clusterManager
+			).start();
 			System.out.println("New " + NODE_ID + " thread started");
 		}
 		kvServerSocket.close();

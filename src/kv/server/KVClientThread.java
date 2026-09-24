@@ -5,26 +5,31 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.Socket;
+import java.util.concurrent.ExecutionException;
 
 import kv.protocol.ExecutionStatus;
 import kv.protocol.Response;
+import kv.cluster.ClusterManager;
 import kv.cluster.OperationProcessor;
 import kv.state.StateManager;
 
 public class KVClientThread extends Thread {
 
-    private Socket kvSocket;
-    private StateManager stateManager;
-    private OperationProcessor operationProcessor;
+    private final Socket kvSocket;
+    private final StateManager stateManager;
+    private final OperationProcessor operationProcessor;
+    private final ClusterManager cluster;
 
     public KVClientThread(
             Socket kvSocket,
             StateManager stateManager,
-            OperationProcessor operationProcessor) {
+            OperationProcessor operationProcessor,
+            ClusterManager clusterManager) {
 
         this.kvSocket = kvSocket;
         this.stateManager = stateManager;
         this.operationProcessor = operationProcessor;
+        this.cluster = clusterManager;
     }
 
     public void run() {
@@ -60,19 +65,7 @@ public class KVClientThread extends Thread {
                         response = stateManager.read(tokens);
 
                     } else {
-
-                        /*
-                         * TEMPORARY SINGLE-NODE MUTATION PATH.
-                         *
-                         * MULTI-NODE CUTOVER:
-                         *
-                         * response = clusterManager.handleClientMutation(tokens);
-                         *
-                         * ClusterManager will then decide:
-                         *   follower -> forward to leader
-                         *   leader   -> persist -> replicate -> commit -> apply
-                         */
-                        response = operationProcessor.processLocalMutation(tokens);
+                        response = cluster.handleClientMutation(tokens);
                     }
 
                     ExecutionStatus status = response.getStatus();
@@ -129,7 +122,10 @@ public class KVClientThread extends Thread {
                     System.err.println(
                         "Failed to get lock when reading: " + e
                     );
-                }
+                } catch (ExecutionException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
             }
 
             out.close();

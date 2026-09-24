@@ -12,10 +12,20 @@ public class ClusterWriterThread extends Thread{
 	public ClusterWriterThread(Socket socket, PeerConnection peer) throws IOException {
 		this.peer = peer;
 		this.socket = socket;
-		out = new PrintWriter(socket.getOutputStream());
+		out = new PrintWriter(socket.getOutputStream(), true);
 	}
 
 	public void run() {
+		while(true) {
+			try {
+				String message = peer.getNextMessage();
+				out.println(message);
+				
+			} catch (InterruptedException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+		}
 		
 	}
 	
