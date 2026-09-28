@@ -24,12 +24,14 @@ public class StorageManager {
     private static final String SNAPSHOT_FILE = "snapshot.dat";
     private static final String TEMP_SNAPSHOT_FILE = "snapshot.tmp";
     private static final String REP_STATE_FILE = "replication.meta";
+    private static final String TEMP_LOG_FILE = "operations.tmp";
 
     private final Path nodeDir;
     private final Path logPath;
     private final Path snapshotPath;
     private final Path tempSnapshotPath;
     private final Path repStatePath;
+    private final Path tempLogPath;
 
     private long checkNum;
 
@@ -41,9 +43,12 @@ public class StorageManager {
         this.snapshotPath = nodeDir.resolve(SNAPSHOT_FILE);
         this.tempSnapshotPath = nodeDir.resolve(TEMP_SNAPSHOT_FILE);
         this.repStatePath = nodeDir.resolve(REP_STATE_FILE);
+        this.tempLogPath = nodeDir.resolve(TEMP_LOG_FILE);
 
         Files.createDirectories(nodeDir);
+        
         Files.deleteIfExists(tempSnapshotPath);
+        Files.deleteIfExists(tempLogPath);
 
         if (Files.notExists(logPath)) {
             Files.createFile(logPath);
@@ -291,7 +296,7 @@ public class StorageManager {
 		}
 	}
 
-	public void writeSnapshot(Map<String, String> data) throws IOException {
+	public synchronized void writeSnapshot(Map<String, String> data, long lastApplied) throws IOException {
 		try (FileChannel channel = FileChannel.open(
 				tempSnapshotPath,
 				StandardOpenOption.CREATE,
@@ -300,7 +305,7 @@ public class StorageManager {
 
 			ByteBuffer checkNumLine =
 					ByteBuffer.wrap(
-							("snapshot last applied = " + checkNum + System.lineSeparator())
+							("snapshot last applied = " + lastApplied + System.lineSeparator())
 							.getBytes(StandardCharsets.UTF_8)
 							);
 
@@ -325,19 +330,53 @@ public class StorageManager {
 			channel.force(true);
 		}
 
+		try (FileChannel channel = FileChannel.open(
+				tempLogPath, 
+				StandardOpenOption.CREATE,
+				StandardOpenOption.WRITE,
+				StandardOpenOption.TRUNCATE_EXISTING )) {
+			
+			try (BufferedReader reader = Files.newBufferedReader(logPath)) {
+				String line;
+
+				while ((line = reader.readLine()) != null) {
+					if (line.isBlank()) {
+						continue;
+					}
+					
+					if(Long.parseLong(line.split(" ")[0]) <= lastApplied) {
+						continue;
+					
+					} else {
+						String record = line + System.lineSeparator();
+
+						ByteBuffer buffer =
+						        ByteBuffer.wrap(record.getBytes(StandardCharsets.UTF_8));
+						
+						while (buffer.hasRemaining()) {
+							channel.write(buffer);
+						}
+					}
+					
+				}
+			}
+			
+			channel.force(true);
+		}
+		
 		Files.move(
 				tempSnapshotPath, 
 				snapshotPath, 
 				StandardCopyOption.REPLACE_EXISTING, 
 				StandardCopyOption.ATOMIC_MOVE
 				);
-
-		try (FileChannel channel = FileChannel.open(
+		
+		Files.move(
+				tempLogPath, 
 				logPath, 
-				StandardOpenOption.WRITE)) {
-			channel.truncate(0);
-			channel.force(true);
-		}
+				StandardCopyOption.REPLACE_EXISTING, 
+				StandardCopyOption.ATOMIC_MOVE
+				);
 	}
 
 	public void resetPersistance() throws IOException {

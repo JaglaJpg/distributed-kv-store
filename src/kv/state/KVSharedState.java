@@ -66,7 +66,7 @@ public class KVSharedState {
 		});
 	}
 
-	int initialiseState(Snapshot snapshot, List<String[]> operations) throws IOException {
+	int initialiseState(Snapshot snapshot, List<String[]> operations, Long lastApplied) throws IOException {
 	    long latestApplied = snapshot.getCheckNum();
 	    long resetCheckNum = 0;
 
@@ -75,6 +75,10 @@ public class KVSharedState {
 	    for (int i = operations.size() - 1; i >= 0; i--) {
 	        String[] op = operations.get(i);
 	        long opNum = Long.parseLong(op[0]);
+	        
+	        if (opNum > lastApplied) {
+	            continue;
+	        }
 
 	        if (opNum <= latestApplied) {
 	            break;
@@ -92,7 +96,13 @@ public class KVSharedState {
 	    int replayedOperations = 0;
 
 	    for (String[] tokens : operations) {
-	        if (Long.parseLong(tokens[0]) <= recoveryBoundary) {
+	        long opNum = Long.parseLong(tokens[0]);
+
+	        if (opNum <= recoveryBoundary) {
+	            continue;
+	        }
+
+	        if (opNum > lastApplied) {
 	            continue;
 	        }
 
@@ -165,7 +175,6 @@ public class KVSharedState {
 		Command cmd = commands.get(tokens[0].toUpperCase());
 		return cmd.execute(tokens);
 	}
-
 
 	public Map<String, String> copyStore(){
 		return new HashMap<>(store);

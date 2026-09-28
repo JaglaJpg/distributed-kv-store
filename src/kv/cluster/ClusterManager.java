@@ -1,7 +1,6 @@
 package kv.cluster;
 
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -32,11 +31,14 @@ public class ClusterManager {
 	private Set<Long> majorityAcked = ConcurrentHashMap.newKeySet();
 
 	private AtomicLong nextRequestId = new AtomicLong(0);
-	
+
 	private long catchUpInProgressThrough = -1;
 
 	private final OperationProcessor operationProcessor;
 	private final ReplicationState repState;
+
+	private final Object commitLock = new Object();
+	private final Object catchUpLock = new Object();
 
 	public ClusterManager(
 			String nodeId,
@@ -54,13 +56,13 @@ public class ClusterManager {
 		String isLeader = (role == NodeRole.LEADER ? " LEADER" : " FOLLOWER");
 		peer.queueMessage("HELLO " + nodeId + isLeader);
 	}
-	
+
 	public void handleMessage(String msg, PeerConnection peer) throws IOException, InterruptedException {
-		
+
 		if (msg.startsWith("HELLO ")) {
-	        handleHello(msg, peer);
-	        return;
-	    }
+			handleHello(msg, peer);
+			return;
+		}
 
 		if (role == NodeRole.LEADER) {
 			handleAsLeader(msg, peer);
@@ -76,15 +78,14 @@ public class ClusterManager {
 		CompletableFuture<Response> future = new CompletableFuture<>();
 
 		pendingRequests.put(requestId, future);
-		
+
 		if (role != NodeRole.LEADER) {
 			String message = "FORWARD " + requestId + " " + String.join(" ", tokens);
 			sendToLeader(message);
-			
+
 		} else {
-			operationProcessor.persistOperation(tokens);
-			long logIndex = repState.getLogEnd();
-			
+			long logIndex = operationProcessor.persistOperation(tokens);
+
 			pendingForwardedRequests.put(
 					logIndex,
 					new ForwardedRequest(
@@ -92,14 +93,14 @@ public class ClusterManager {
 							null
 							)
 					);
-			
+
 			String message = "REPLICATE " + logIndex + " " + String.join(" ", tokens);
 
 			sendToFollowers(message);
-			
+
 		}
 
-		
+
 
 		return future.get();
 	}
@@ -118,18 +119,18 @@ public class ClusterManager {
 			follower.queueMessage(message);
 		}
 	}
-	
+
 	private void handleHello(String msg, PeerConnection peer) {
-	    String[] parts = msg.split(" ");
+		String[] parts = msg.split(" ");
 
-	    String peerId = parts[1];
-	    NodeRole peerRole = NodeRole.valueOf(parts[2]);
+		String peerId = parts[1];
+		NodeRole peerRole = NodeRole.valueOf(parts[2]);
 
-	    peers.put(peerId, peer);
+		peers.put(peerId, peer);
 
-	    if (peerRole == NodeRole.LEADER) {
-	        leaderId = peerId;
-	    }
+		if (peerRole == NodeRole.LEADER) {
+			leaderId = peerId;
+		}
 	}
 
 	public void handleAsLeader(String msg, PeerConnection peer) throws IOException, InterruptedException {
@@ -140,9 +141,7 @@ public class ClusterManager {
 			long requestId = Long.parseLong(parts[1]);
 			String[] tokens = parts[2].split("\\s+");
 
-			operationProcessor.persistOperation(tokens);
-
-			long logIndex = repState.getLogEnd();
+			long logIndex = operationProcessor.persistOperation(tokens);
 
 			pendingForwardedRequests.put(
 					logIndex,
@@ -160,59 +159,61 @@ public class ClusterManager {
 			String[] parts = msg.split(" ");
 			long ackedIndex = Long.parseLong(parts[1]);
 
-			if (ackedIndex <= repState.getCommitIndex()) {
-			    peer.queueMessage("COMMIT " + repState.getCommitIndex());
-			    return;
-			}
-			
-			majorityAcked.add(ackedIndex);
+			synchronized (commitLock) {
+				if (ackedIndex <= repState.getCommitIndex()) {
+					peer.queueMessage("COMMIT " + repState.getCommitIndex());
+					return;
+				}
 
-			long oldCommitIndex = repState.getCommitIndex();
+				majorityAcked.add(ackedIndex);
 
-			while (majorityAcked.contains(repState.getCommitIndex() +1)) {
-				long nextIndex = repState.getCommitIndex() + 1;
+				long oldCommitIndex = repState.getCommitIndex();
 
-				repState.advanceCommitIndex(nextIndex);
+				while (majorityAcked.contains(repState.getCommitIndex() +1)) {
+					long nextIndex = repState.getCommitIndex() + 1;
 
-				majorityAcked.remove(nextIndex);
-			}
+					repState.advanceCommitIndex(nextIndex);
 
-			long newCommitIndex = repState.getCommitIndex();
+					majorityAcked.remove(nextIndex);
+				}
 
-			if (newCommitIndex > oldCommitIndex) {
-				List<Response> responses = operationProcessor.applyCommittedThrough(); 
+				long newCommitIndex = repState.getCommitIndex();
 
+				if (newCommitIndex > oldCommitIndex) {
+					List<Response> responses = operationProcessor.applyCommittedThrough(); 
 
-				int responseIndex = 0;
+					int responseIndex = 0;
 
-				for (long logIndex = oldCommitIndex + 1;
-						logIndex <= newCommitIndex;
-						logIndex++) {
+					for (long logIndex = oldCommitIndex + 1;
+							logIndex <= newCommitIndex;
+							logIndex++) {
 
-					Response response = responses.get(responseIndex++);
+						Response response = responses.get(responseIndex++);
 
-					ForwardedRequest request =
-							pendingForwardedRequests.remove(logIndex);
+						ForwardedRequest request =
+								pendingForwardedRequests.remove(logIndex);
 
-					if (request.originPeer() == null) {
+						if (request.originPeer() == null) {
 
-					    CompletableFuture<Response> future =
-					            pendingRequests.remove(request.requestId());
+							CompletableFuture<Response> future =
+									pendingRequests.remove(request.requestId());
 
-					    future.complete(response);
+							future.complete(response);
 
-					} else {
+						} else {
 
-						String payload = response.getPayload();
+							String payload = response.getPayload();
 
-						String message =
-						        "RESULT "
-						        + request.requestId() + " "
-						        + response.getStatus().name() + " "
-						        + (payload == null ? "" : payload);
+							String message =
+									"RESULT "
+											+ request.requestId() + " "
+											+ response.getStatus().name() + " "
+											+ (payload == null ? "" : payload);
 
-						request.originPeer().queueMessage(message);
+							request.originPeer().queueMessage(message);
+						}
 					}
+
 				}
 
 
@@ -224,19 +225,19 @@ public class ClusterManager {
 			String reason = parts[1];
 			Long followerLogEnd = Long.parseLong(parts[2]);
 			Long target = Long.parseLong(parts[3]);
-			
+
 			List<String[]> catchUp = operationProcessor.loadCatchUpFromLog(followerLogEnd, target);
-			
+
 			for(String[] operation : catchUp) {
 				peer.queueMessage("CATCHUP " + reason +" "+ target + " " + String.join(" ", operation));
 			}
-			
+
 			peer.queueMessage("CATCHUP_DONE " + reason +" "+ target);
 
 		} else {
 			System.err.println(
-			        "Unknown cluster message received by leader: " + msg
-			    );
+					"Unknown cluster message received by leader: " + msg
+					);
 
 		}
 	}
@@ -244,124 +245,130 @@ public class ClusterManager {
 	public void handleAsFollower(String msg, PeerConnection peer) throws IOException, InterruptedException {
 		if (msg.startsWith("REPLICATE ")) {
 			Long logEnd = repState.getLogEnd();
-			
+
 			String[] parts = msg.split(" ", 3);
 			Long logIndex = Long.parseLong(parts[1]); 
 			String[] tokens = parts[2].split(" ");
-			
+
 			if (logEnd < logIndex - 1) {
 
-			    if (logIndex > catchUpInProgressThrough) {
-			        catchUpInProgressThrough = logIndex;
+				synchronized (catchUpLock) {
+					if (logIndex > catchUpInProgressThrough) {
+						catchUpInProgressThrough = logIndex;
 
-			        sendToLeader(
-			            "CATCHUP_REQUEST REPLICATE "
-			            + logEnd + " " + logIndex
-			        );
-			    }
+						sendToLeader(
+								"CATCHUP_REQUEST REPLICATE "
+										+ logEnd + " " + logIndex
+								);
+					}
+				}
 
 			} else if (logEnd >= logIndex) {
-			    sendToLeader("REPLICATE_ACK " + logIndex);
-			    return;
+				sendToLeader("REPLICATE_ACK " + logIndex);
+				return;
 
 			} else {
-			    operationProcessor.persistOperation(tokens);
-			    sendToLeader("REPLICATE_ACK " + logIndex);
+				operationProcessor.persistOperation(tokens);
+				sendToLeader("REPLICATE_ACK " + logIndex);
 			}
 
 		} else if (msg.startsWith("COMMIT ")) {
 
-		    long commitIndex = repState.getCommitIndex();
-		    long logEnd = repState.getLogEnd();
+			long commitIndex = repState.getCommitIndex();
+			long logEnd = repState.getLogEnd();
 
-		    long newCommitIndex =
-		            Long.parseLong(msg.split(" ")[1]);
+			long newCommitIndex =
+					Long.parseLong(msg.split(" ")[1]);
 
-		    if (logEnd < newCommitIndex) {
-		        if (newCommitIndex > catchUpInProgressThrough) {
-		            catchUpInProgressThrough = newCommitIndex;
+			if (logEnd < newCommitIndex) {
 
-		            sendToLeader(
-		                "CATCHUP_REQUEST COMMIT "
-		                + logEnd + " " + newCommitIndex
-		            );
-		        }
+			    synchronized (catchUpLock) {
+			        if (newCommitIndex > catchUpInProgressThrough) {
+			            catchUpInProgressThrough = newCommitIndex;
 
-		    } else if (newCommitIndex > commitIndex) {
+			            sendToLeader(
+			                "CATCHUP_REQUEST COMMIT "
+			                + logEnd + " " + newCommitIndex
+			            );
+			        }
+			    }
 
-		        repState.advanceCommitIndex(newCommitIndex);
-		        operationProcessor.applyCommittedThrough();
-		    }
+			} else if (newCommitIndex > commitIndex) {
+
+			    repState.advanceCommitIndex(newCommitIndex);
+			    operationProcessor.applyCommittedThrough();
+			}
 
 		} else if (msg.startsWith("RESULT ")) {
 			String[] parts = msg.split(" ", 4);
-			
+
 			Long requestId = Long.parseLong(parts[1]);
-			
+
 			ExecutionStatus status =
-		            ExecutionStatus.valueOf(parts[2]);
+					ExecutionStatus.valueOf(parts[2]);
 
-		    String payload =
-		            parts.length == 4 ? parts[3] : null;
+			String payload =
+					parts.length == 4 ? parts[3] : null;
 
-		    Response response = new Response(status, payload);
+			Response response = new Response(status, payload);
 
-		    CompletableFuture<Response> future =
-		            pendingRequests.remove(requestId);
+			CompletableFuture<Response> future =
+					pendingRequests.remove(requestId);
 
-		    future.complete(response);
+			future.complete(response);
 
 		} else if (msg.startsWith("CATCHUP ")) {
 
 			// TODO: receive/apply missing log entries
 			String[] parts = msg.split(" ", 5);
-			
+
 			Long incomingIndex = Long.parseLong(parts[3]);
 			Long logEnd = repState.getLogEnd();
 			String[] tokens = parts[4].split(" ");
-			
+
 			if (incomingIndex == logEnd + 1) {
 				operationProcessor.persistOperation(tokens);
 			} 
-			
+
 
 		} else if (msg.startsWith("CATCHUP_DONE ")) {
 			String[] parts = msg.split(" ");
-			
+
 			String reason = parts[1];
 			Long target = Long.parseLong(parts[2]);
 			Long logEnd = repState.getLogEnd();
-			
+
 			if (logEnd < target) {
 				sendToLeader("CATCHUP_REQUEST " + reason + " " + logEnd + " " + target);
-				
+
 			} else {
 				if (reason.equals("REPLICATE")) {
 					sendToLeader("REPLICATE_ACK " + target);
-					
+
 				} else if (reason.equals("COMMIT")) {
 					if (target > repState.getCommitIndex()) {
-				        repState.advanceCommitIndex(target);
-				        operationProcessor.applyCommittedThrough();
-				        
+						repState.advanceCommitIndex(target);
+						operationProcessor.applyCommittedThrough();
+
+					}
+				}
+				synchronized (catchUpLock) {
+				    if (target == catchUpInProgressThrough) {
+				        catchUpInProgressThrough = -1;
 				    }
 				}
-				if (target == catchUpInProgressThrough) {
-				    catchUpInProgressThrough = -1;
-				}
-				
+
 			}
-			
-			
-			
-			
+
+
+
+
 		} else {
 			System.err.println(
-			        "Unknown cluster message received by leader: " + msg
-			    );
+					"Unknown cluster message received by leader: " + msg
+					);
 		}
 	}
-
 
 
 }

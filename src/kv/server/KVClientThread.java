@@ -35,10 +35,15 @@ public class KVClientThread extends Thread {
     public void run() {
         System.out.println("Initialising");
 
-        try {
-            PrintWriter out = new PrintWriter(kvSocket.getOutputStream(), true);
-            BufferedReader in =
-                    new BufferedReader(new InputStreamReader(kvSocket.getInputStream()));
+        try (
+        	    PrintWriter out =
+        	        new PrintWriter(kvSocket.getOutputStream(), true);
+
+        	    BufferedReader in =
+        	        new BufferedReader(
+        	            new InputStreamReader(kvSocket.getInputStream())
+        	        )
+        	) {
 
             String inputLine;
 
@@ -127,13 +132,11 @@ public class KVClientThread extends Thread {
 					e.printStackTrace();
 				}
             }
-
-            out.close();
-            in.close();
+            
             kvSocket.close();
 
         } catch (IOException e) {
-            e.printStackTrace();
+        	System.out.println("Client disconnected.");
         }
     }
 }

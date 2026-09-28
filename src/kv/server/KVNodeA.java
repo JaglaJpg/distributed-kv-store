@@ -23,19 +23,18 @@ public class KVNodeA {
 	public static Socket prevNodeSocket = null;
 	public static Socket nextNodeSocket = null;
 	
-	public static void main(String[] args) throws IOException {
+	public static void main(String[] args) throws IOException, InterruptedException {
 		
 		ServerSocket kvServerSocket = null;
 		boolean listening = true;
 		
 		StorageManager storageManager = new StorageManager(NODE_ID);
 		
-		StateManager stateManager = new StateManager(storageManager);
-
-		 // IF you expose it this way
-
 		Long[] savedRepState = storageManager.loadRepState();
 		ReplicationState repState = new ReplicationState(savedRepState);
+		
+		StateManager stateManager = new StateManager(storageManager, repState);
+
 
 		OperationProcessor operationProcessor =
 		        new OperationProcessor(
@@ -44,6 +43,9 @@ public class KVNodeA {
 		            stateManager
 		        );
 		
+		if (repState.getLastApplied() < repState.getCommitIndex()) {
+		    operationProcessor.applyCommittedThrough();
+		}
 		
 		ClusterManager clusterManager =
 		        new ClusterManager(

@@ -12,23 +12,24 @@ public class ReplicationState {
         this.logEnd = repState[2];
     }
 
-    public Long getLogEnd() {
+    public synchronized Long getLogEnd() {
         return logEnd;
     }
 
-    public Long getCommitIndex() {
+    public synchronized Long getCommitIndex() {
         return commitIndex;
     }
 
-    public Long getLastApplied() {
+    public synchronized Long getLastApplied() {
         return lastApplied;
     }
 
-    public void incrementLogEnd() {
+    public synchronized long incrementLogEnd() {
         logEnd++;
+        return logEnd;
     }
 
-    public void advanceCommitIndex(Long newCommitIndex) {
+    public synchronized long advanceCommitIndex(Long newCommitIndex) {
         if (newCommitIndex < commitIndex) {
             throw new IllegalArgumentException("commitIndex cannot move backwards");
         }
@@ -38,14 +39,16 @@ public class ReplicationState {
         }
 
         commitIndex = newCommitIndex;
+        return commitIndex;
     }
 
-    public void incrementLastApplied() {
+    public synchronized long incrementLastApplied() {
         if (lastApplied + 1 > commitIndex) {
             throw new IllegalStateException("lastApplied cannot exceed commitIndex");
         }
 
         lastApplied++;
+        return lastApplied;
     }
 
     public Long[] getRepState() {

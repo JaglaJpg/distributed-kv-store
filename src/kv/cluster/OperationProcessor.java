@@ -22,24 +22,12 @@ public class OperationProcessor {
 		this.state = state;
 	}
 
-	public void persistOperation(String[] tokens) throws IOException{
+	public Long persistOperation(String[] tokens) throws IOException{
 		storage.appendOperation(tokens);
-		repState.incrementLogEnd();
+		Long logEnd = repState.incrementLogEnd();
 		storage.saveRepState(repState.getRepState());
 
-	}
-
-	public Response processLocalMutation(String[] tokens)
-			throws IOException, InterruptedException {
-
-		persistOperation(tokens);
-
-		// Temporary single-node behaviour:
-		// this node alone is currently enough to consider the entry committed.
-		repState.advanceCommitIndex(repState.getLogEnd());
-		storage.saveRepState(repState.getRepState());
-
-		return applyCommittedOperation(tokens);
+		return logEnd;
 	}
 
 	public List<Response> applyCommittedThrough()

@@ -24,32 +24,37 @@ public class KVNodeC {
     public static Socket prevNodeSocket = null;
     public static Socket nextNodeSocket = null;
 
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) throws IOException, InterruptedException {
 
-        ServerSocket kvServerSocket = null;
-        boolean listening = true;
+    	ServerSocket kvServerSocket = null;
+		boolean listening = true;
+		
+		StorageManager storageManager = new StorageManager(NODE_ID);
+		
+		Long[] savedRepState = storageManager.loadRepState();
+		ReplicationState repState = new ReplicationState(savedRepState);
+		
+		StateManager stateManager = new StateManager(storageManager, repState);
 
-        StorageManager storageManager = new StorageManager(NODE_ID);
 
-        StateManager stateManager = new StateManager(storageManager);
-
-        Long[] savedRepState = storageManager.loadRepState();
-        ReplicationState repState = new ReplicationState(savedRepState);
-
-        OperationProcessor operationProcessor =
-                new OperationProcessor(
-                        repState,
-                        storageManager,
-                        stateManager
-                );
-
-        ClusterManager clusterManager =
-                new ClusterManager(
-                        NODE_ID,
-                        NodeRole.FOLLOWER,
-                        operationProcessor,
-                        repState
-                );
+		OperationProcessor operationProcessor =
+		        new OperationProcessor(
+		            repState,
+		            storageManager,
+		            stateManager
+		        );
+		
+		if (repState.getLastApplied() < repState.getCommitIndex()) {
+		    operationProcessor.applyCommittedThrough();
+		}
+		
+		ClusterManager clusterManager =
+		        new ClusterManager(
+		                NODE_ID,
+		                NodeRole.LEADER,
+		                operationProcessor,
+		                repState
+		        );
 
         new WorkerThread(stateManager).start();
 

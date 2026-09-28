@@ -3,6 +3,7 @@ package kv.state;
 import java.io.IOException;
 import java.util.Map;
 
+import kv.cluster.ReplicationState;
 import kv.protocol.ExecutionStatus;
 import kv.protocol.Response;
 import kv.storage.CheckpointCoordinator;
@@ -12,14 +13,16 @@ public class StateManager {
 	private final StorageManager storage;
 	private final CheckpointCoordinator checkpoint;
 	private final KVSharedState state;
+	private final ReplicationState repState;
 
-	public StateManager(StorageManager storage) throws IOException {
+	public StateManager(StorageManager storage, ReplicationState repState) throws IOException {
 	    this.storage = storage;
 	    this.state = new KVSharedState();
+	    this.repState = repState;
 	    
 	    this.checkpoint =
 	    	    new CheckpointCoordinator(
-	    	        state.initialiseState(storage.loadSnapshot(),storage.loadLog())
+	    	        state.initialiseState(storage.loadSnapshot(),storage.loadLog(), repState.getLastApplied())
 	    	    );
 		
 	}
@@ -93,7 +96,7 @@ public class StateManager {
 		
 		try {
 			Map<String, String> storeCopy = state.copyStore();
-			storage.writeSnapshot(storeCopy);
+			storage.writeSnapshot(storeCopy, repState.getLastApplied());
 			checkpoint.finishCheckpoint(true);
 			
 		} catch (IOException e) {
@@ -110,7 +113,6 @@ public class StateManager {
 		checkpoint.enterExclusiveOperation();
 		
 		try {
-			storage.appendOperation(tokens);
 			storage.resetPersistance();
 			checkpoint.resetMutationCount();
 			response = state.executeCommand(tokens);
