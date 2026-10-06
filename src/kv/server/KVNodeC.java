@@ -17,6 +17,7 @@ import kv.storage.StorageManager;
 public class KVNodeC {
 
     private static final String NODE_ID = "Casper-3";
+    private static final String SUCCESSOR_ID = "Balthasar-2";
     private static final int CLIENT_PORT = 7003;
     private static final int MY_CLUSTER_PORT = 8003;
     private static final int NEXT_CLUSTER_PORT = 8002;
@@ -51,7 +52,8 @@ public class KVNodeC {
 		ClusterManager clusterManager =
 		        new ClusterManager(
 		                NODE_ID,
-		                NodeRole.LEADER,
+		                SUCCESSOR_ID,
+		                NodeRole.FOLLOWER,
 		                operationProcessor,
 		                repState
 		        );
@@ -112,47 +114,84 @@ public class KVNodeC {
 
         new Thread(() -> {
 
-            System.out.println(
-                    NODE_ID
-                    + " attempting to connect to next node on port "
-                    + NEXT_CLUSTER_PORT
-            );
-
-            while (nextNodeSocket == null) {
+            while (true) {
                 try {
+                    System.out.println(
+                        NODE_ID + " attempting to connect to next node on port "
+                        + NEXT_CLUSTER_PORT
+                    );
+
                     nextNodeSocket =
-                            new Socket(
-                                    "localhost",
-                                    NEXT_CLUSTER_PORT
-                            );
+                            new Socket("localhost", NEXT_CLUSTER_PORT);
 
                     PeerConnection peer = new PeerConnection();
 
                     System.out.println(
-                            NODE_ID
-                            + " successfully connected to next node!"
+                        NODE_ID + " successfully connected to next node!"
                     );
 
-                    new ClusterReaderThread(
-                            nextNodeSocket,
-                            peer,
-                            clusterManager
-                    ).start();
+                    ClusterReaderThread reader =
+                            new ClusterReaderThread(
+                                nextNodeSocket,
+                                peer,
+                                clusterManager
+                            );
 
-                    new ClusterWriterThread(
-                            nextNodeSocket,
-                            peer
-                    ).start();
+                    ClusterWriterThread writer =
+                            new ClusterWriterThread(
+                                nextNodeSocket,
+                                peer
+                            );
+
+                    reader.start();
+                    writer.start();
 
                     clusterManager.sendHello(peer);
 
+                    // Wait here until this connection's reader dies.
+                    reader.join();
+
+                    System.out.println(
+                        NODE_ID + " connection to next node was lost."
+                    );
+
                 } catch (IOException e) {
+
+                    // new Socket(...) failed because successor isn't available yet.
+                    System.out.println(
+                        NODE_ID + " could not connect to next node. Retrying..."
+                    );
+
+                } catch (InterruptedException e) {
+
+                    // This connection-manager thread itself was asked to stop.
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+
+                // Clean up whatever socket belonged to the failed/dead connection.
+                if (nextNodeSocket != null) {
                     try {
-                        Thread.sleep(2000);
-                    } catch (InterruptedException ignored) {
+                        nextNodeSocket.close();
+                    } catch (IOException e) {
+                        System.err.println(
+                            NODE_ID + " error closing old cluster socket: "
+                            + e.getMessage()
+                        );
                     }
+
+                    nextNodeSocket = null;
+                }
+
+                // Don't hammer the successor with connection attempts.
+                try {
+                    Thread.sleep(2000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
                 }
             }
+
         }).start();
 
         while (listening) {

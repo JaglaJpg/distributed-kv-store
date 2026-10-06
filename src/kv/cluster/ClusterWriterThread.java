@@ -21,9 +21,13 @@ public class ClusterWriterThread extends Thread{
 				String message = peer.getNextMessage();
 				out.println(message);
 				
+				if (out.checkError()) {
+	                return;
+	            }
+				
 			} catch (InterruptedException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
+			    Thread.currentThread().interrupt();
+			    return;
 			}
 		}
 		

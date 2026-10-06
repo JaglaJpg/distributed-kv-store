@@ -14,7 +14,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Pattern;
 
 public class StorageManager {
 
@@ -32,8 +31,6 @@ public class StorageManager {
     private final Path tempSnapshotPath;
     private final Path repStatePath;
     private final Path tempLogPath;
-
-    private long checkNum;
 
     public StorageManager(String nodeId) throws IOException {
 
@@ -92,44 +89,6 @@ public class StorageManager {
                 channel.force(true);
             }
         }
-
-        long snapshotNum = 0;
-        long logNum = 0;
-
-        if (Files.exists(snapshotPath)) {
-            try (BufferedReader br =
-                    Files.newBufferedReader(snapshotPath)) {
-
-                String firstLine = br.readLine();
-
-                if (firstLine != null) {
-                    snapshotNum = Long.parseLong(
-                            Pattern.compile(" ")
-                                    .splitAsStream(firstLine)
-                                    .toList()
-                                    .getLast()
-                    );
-                }
-            }
-        }
-
-        try (BufferedReader br =
-                Files.newBufferedReader(logPath)) {
-
-            String line;
-            String lastLine = null;
-
-            while ((line = br.readLine()) != null) {
-                lastLine = line;
-            }
-
-            if (lastLine != null) {
-                logNum =
-                        Long.parseLong(lastLine.split(" ")[0]);
-            }
-        }
-
-        this.checkNum = Math.max(snapshotNum, logNum);
     }
 
 
@@ -257,8 +216,7 @@ public class StorageManager {
 		return operations;
 	}
 
-	public synchronized void appendOperation(String[] tokens) throws IOException {
-		long operationNum = ++checkNum;
+	public synchronized void appendOperation(long operationNum, String[] tokens) throws IOException {
 		String command = tokens[0].toUpperCase();
 
 		String operation = operationNum + " " + command;
@@ -303,14 +261,14 @@ public class StorageManager {
 				StandardOpenOption.WRITE,
 				StandardOpenOption.TRUNCATE_EXISTING )) {
 
-			ByteBuffer checkNumLine =
+			ByteBuffer snapshotBoundaryLine =
 					ByteBuffer.wrap(
 							("snapshot last applied = " + lastApplied + System.lineSeparator())
 							.getBytes(StandardCharsets.UTF_8)
 							);
 
-			while (checkNumLine.hasRemaining()) {
-				channel.write(checkNumLine);
+			while (snapshotBoundaryLine.hasRemaining()) {
+				channel.write(snapshotBoundaryLine);
 			}
 
 
@@ -447,5 +405,69 @@ public class StorageManager {
 	    }
 
 	    return repState;
+	}
+	
+	public Long getSnapshotBoundary() throws IOException {
+		Long boundary = 0L;
+		
+		if (Files.notExists(snapshotPath)) {
+		    return boundary;
+		}
+		
+		try (BufferedReader br = Files.newBufferedReader(snapshotPath)) {
+			String[] line = br.readLine().split("\\s+");
+			
+			boundary = Long.parseLong(line[4]);
+		}
+		
+		return boundary;
+	}
+	
+	public String loadSerialisedSnapshot() throws IOException {
+		Map<String, String> data = loadSnapshot().getSnapshot();
+		
+	    StringBuilder snapshot = new StringBuilder();
+
+	    for (Map.Entry<String, String> entry : data.entrySet()) {
+	        String key = entry.getKey();
+	        String value = entry.getValue();
+
+	        snapshot.append(key.length())
+	                .append(":")
+	                .append(key)
+	                .append(value.length())
+	                .append(":")
+	                .append(value);
+	        
+	    }
+
+	    return snapshot.toString();
+	}
+	
+	public Map<String, String> deserialiseSnapshot(String serialisedSnapshot) {
+		Map<String, String> snapshotMap = new HashMap<>();
+	
+		int index = 0;
+		
+		while (index < serialisedSnapshot.length()) {
+
+			int colon = serialisedSnapshot.indexOf(':', index);
+			int keyLength = Integer.parseInt(serialisedSnapshot.substring(index, colon));
+			index = colon + 1;
+
+			String key = serialisedSnapshot.substring(index, index + keyLength);
+			index += keyLength;
+
+			colon = serialisedSnapshot.indexOf(':', index);
+			int valueLength = Integer.parseInt(serialisedSnapshot.substring(index, colon));
+			index = colon + 1;
+
+			String value = serialisedSnapshot.substring(index, index + valueLength);
+			index += valueLength;
+
+			snapshotMap.put(key, value);
+		}
+		
+		return snapshotMap;
 	}
 }

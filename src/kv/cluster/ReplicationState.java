@@ -51,6 +51,12 @@ public class ReplicationState {
         return lastApplied;
     }
 
+    public synchronized void installSnapshotBaseline(Long boundary) {
+    	commitIndex = boundary;
+    	logEnd = boundary;
+    	lastApplied = boundary;
+    }
+    
     public Long[] getRepState() {
         return new Long[] {lastApplied, commitIndex, logEnd};
     }

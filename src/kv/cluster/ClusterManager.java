@@ -18,6 +18,7 @@ public class ClusterManager {
 	private NodeRole role;
 
 	private Map<String, PeerConnection> peers = new ConcurrentHashMap<>();;
+	private String successorId;
 	private String leaderId;
 
 	private record ForwardedRequest(
@@ -42,11 +43,13 @@ public class ClusterManager {
 
 	public ClusterManager(
 			String nodeId,
+			String successorId,
 			NodeRole role,
 			OperationProcessor operationProcessor,
 			ReplicationState repState) {
 
 		this.nodeId = nodeId;
+		this.successorId = successorId;
 		this.role = role;
 		this.operationProcessor = operationProcessor;
 		this.repState = repState;
@@ -225,14 +228,42 @@ public class ClusterManager {
 			String reason = parts[1];
 			Long followerLogEnd = Long.parseLong(parts[2]);
 			Long target = Long.parseLong(parts[3]);
+			List<String[]> catchUp;
+			
+			if(operationProcessor.requiresSnapshotCatchUp(followerLogEnd)) {
+				
+		        String[] snapshotTransfer =
+		                operationProcessor.prepareSnapshotTransfer();
 
-			List<String[]> catchUp = operationProcessor.loadCatchUpFromLog(followerLogEnd, target);
+		        long snapshotBoundary =
+		                Long.parseLong(snapshotTransfer[0]);
 
+		        String serializedSnapshot =
+		                snapshotTransfer[1];
+
+		        peer.queueMessage(
+		                "CATCHUP SNAPSHOT "
+		                + snapshotBoundary + " "
+		                + serializedSnapshot
+		        );
+
+		        catchUp = operationProcessor.loadCatchUpFromLog(
+		                snapshotBoundary,
+		                target
+		        );
+				
+			} else {
+				catchUp = operationProcessor.loadCatchUpFromLog(followerLogEnd, target);
+				
+			}
+			
 			for(String[] operation : catchUp) {
 				peer.queueMessage("CATCHUP " + reason +" "+ target + " " + String.join(" ", operation));
 			}
 
 			peer.queueMessage("CATCHUP_DONE " + reason +" "+ target);
+
+			
 
 		} else {
 			System.err.println(
@@ -318,17 +349,23 @@ public class ClusterManager {
 			future.complete(response);
 
 		} else if (msg.startsWith("CATCHUP ")) {
-
-			// TODO: receive/apply missing log entries
 			String[] parts = msg.split(" ", 5);
+			
+			if (parts[1].equals("SNAPSHOT")) {
+				Long boundary = Long.parseLong(parts[2]);
+				String serialisedSnapshot = parts[3];
+				
+				operationProcessor.installSnapshotCatchUp(serialisedSnapshot, boundary);
+				
+			} else {
+				Long incomingIndex = Long.parseLong(parts[3]);
+				Long logEnd = repState.getLogEnd();
+				String[] tokens = parts[4].split(" ");
 
-			Long incomingIndex = Long.parseLong(parts[3]);
-			Long logEnd = repState.getLogEnd();
-			String[] tokens = parts[4].split(" ");
-
-			if (incomingIndex == logEnd + 1) {
-				operationProcessor.persistOperation(tokens);
-			} 
+				if (incomingIndex == logEnd + 1) {
+					operationProcessor.persistOperation(tokens);
+				} 
+			}
 
 
 		} else if (msg.startsWith("CATCHUP_DONE ")) {

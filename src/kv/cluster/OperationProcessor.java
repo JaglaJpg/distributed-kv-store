@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 import kv.protocol.ExecutionStatus;
 import kv.protocol.Response;
@@ -22,12 +23,13 @@ public class OperationProcessor {
 		this.state = state;
 	}
 
-	public Long persistOperation(String[] tokens) throws IOException{
-		storage.appendOperation(tokens);
-		Long logEnd = repState.incrementLogEnd();
-		storage.saveRepState(repState.getRepState());
+	public Long persistOperation(String[] tokens) throws IOException {
+	    Long logIndex = repState.incrementLogEnd();
 
-		return logEnd;
+	    storage.appendOperation(logIndex, tokens);
+	    storage.saveRepState(repState.getRepState());
+
+	    return logIndex;
 	}
 
 	public List<Response> applyCommittedThrough()
@@ -104,4 +106,31 @@ public class OperationProcessor {
 
 	    return result;
 	}
+	
+	public boolean requiresSnapshotCatchUp(long followerLogEnd) throws IOException {
+	    long snapshotBoundary = storage.getSnapshotBoundary();
+
+	    return followerLogEnd < snapshotBoundary;
+	}
+	
+	public String[] prepareSnapshotTransfer() throws IOException {
+		String[] transferSnapshot = new String[2];
+		
+		transferSnapshot[0] = "" + storage.getSnapshotBoundary();
+		transferSnapshot[1] = storage.loadSerialisedSnapshot();
+		
+		return transferSnapshot;
+		
+	}
+	
+	public void installSnapshotCatchUp(String serialisedSnapshot, long boundary) throws IOException {
+		Map<String, String> snapshot = storage.deserialiseSnapshot(serialisedSnapshot);
+		
+		storage.writeSnapshot(snapshot, boundary);
+		
+		state.installSnapshot(snapshot);
+		
+		repState.installSnapshotBaseline(boundary);
+	}
+	
 }

@@ -35,12 +35,11 @@ public class ClusterReaderThread extends Thread{
 			}
 			
 		} catch (IOException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
+			System.out.println("Cluster peer connection lost.");
 			
 		} catch (InterruptedException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
+			Thread.currentThread().interrupt();
+			
 		}
 		
 	}

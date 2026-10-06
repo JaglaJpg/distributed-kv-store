@@ -180,4 +180,7 @@ public class KVSharedState {
 		return new HashMap<>(store);
 	}
 
+	public void replaceState(Map<String, String> snapshot) {
+		this.store = new ConcurrentHashMap<>(snapshot);
+	}
 }

@@ -108,6 +108,17 @@ public class StateManager {
 		}
 	}
 	
+	public void installSnapshot(Map<String, String> snapshotMap) {
+		checkpoint.enterExclusiveOperation();
+		
+		try {
+			state.replaceState(snapshotMap);
+			
+		} finally {
+			checkpoint.leaveExclusiveOperation();
+		}
+	}
+	
 	public Response handleReset(String[] tokens) throws IOException {
 		Response response;
 		checkpoint.enterExclusiveOperation();
