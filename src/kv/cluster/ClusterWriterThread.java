@@ -15,22 +15,26 @@ public class ClusterWriterThread extends Thread{
 		out = new PrintWriter(socket.getOutputStream(), true);
 	}
 
+	@Override
 	public void run() {
-		while(true) {
-			try {
-				String message = peer.getNextMessage();
-				out.println(message);
-				
-				if (out.checkError()) {
+	    try {
+	        while (true) {
+	            String message = peer.getNextMessage();
+	            out.println(message);
+
+	            if (out.checkError()) {
 	                return;
 	            }
-				
-			} catch (InterruptedException e) {
-			    Thread.currentThread().interrupt();
-			    return;
-			}
-		}
-		
+	        }
+	    } catch (InterruptedException e) {
+	        Thread.currentThread().interrupt();
+	    } finally {
+	        try {
+	            socket.close();
+	        } catch (IOException e) {
+	            // Already closed.
+	        }
+	    }
 	}
 	
 }

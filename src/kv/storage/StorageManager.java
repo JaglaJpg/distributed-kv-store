@@ -24,6 +24,7 @@ public class StorageManager {
     private static final String TEMP_SNAPSHOT_FILE = "snapshot.tmp";
     private static final String REP_STATE_FILE = "replication.meta";
     private static final String TEMP_LOG_FILE = "operations.tmp";
+    private static final String TEMP_REP_STATE_FILE = "replication.tmp";
 
     private final Path nodeDir;
     private final Path logPath;
@@ -31,6 +32,7 @@ public class StorageManager {
     private final Path tempSnapshotPath;
     private final Path repStatePath;
     private final Path tempLogPath;
+    private final Path tempRepStatePath;
 
     public StorageManager(String nodeId) throws IOException {
 
@@ -41,11 +43,13 @@ public class StorageManager {
         this.tempSnapshotPath = nodeDir.resolve(TEMP_SNAPSHOT_FILE);
         this.repStatePath = nodeDir.resolve(REP_STATE_FILE);
         this.tempLogPath = nodeDir.resolve(TEMP_LOG_FILE);
+        this.tempRepStatePath = nodeDir.resolve(TEMP_REP_STATE_FILE);
 
         Files.createDirectories(nodeDir);
         
         Files.deleteIfExists(tempSnapshotPath);
         Files.deleteIfExists(tempLogPath);
+        Files.deleteIfExists(tempRepStatePath);
 
         if (Files.notExists(logPath)) {
             Files.createFile(logPath);
@@ -238,19 +242,37 @@ public class StorageManager {
 		String record = operation + System.lineSeparator();
 
 		try (FileChannel channel = FileChannel.open(
-				logPath,
-				StandardOpenOption.CREATE,
-				StandardOpenOption.WRITE,
-				StandardOpenOption.APPEND)) {
+		        logPath,
+		        StandardOpenOption.CREATE,
+		        StandardOpenOption.WRITE)) {
 
-			ByteBuffer buffer =
-					ByteBuffer.wrap(record.getBytes(StandardCharsets.UTF_8));
+		    long originalSize = channel.size();
+		    channel.position(originalSize);
 
-			while (buffer.hasRemaining()) {
-				channel.write(buffer);
-			}
+		    try {
+		        ByteBuffer buffer = ByteBuffer.wrap(
+		                record.getBytes(StandardCharsets.UTF_8)
+		        );
 
-			channel.force(true);
+		        while (buffer.hasRemaining()) {
+		            channel.write(buffer);
+		        }
+
+		        channel.force(true);
+
+		    }catch (IOException appendFailure) {
+		            try {
+		                channel.truncate(originalSize);
+		                channel.force(true);
+		            } catch (IOException rollbackFailure) {
+		                System.err.println(
+		                    "FATAL: WAL rollback failed: " + rollbackFailure.getMessage()
+		                );
+		                System.exit(1);
+		            }
+
+		            throw appendFailure;
+		        }
 		}
 	}
 
@@ -349,10 +371,10 @@ public class StorageManager {
 		}
 	}
 
-	public void saveRepState(Long[] repState) throws IOException {
+	public synchronized void saveRepState(Long[] repState) throws IOException {
 
 		try (FileChannel channel = FileChannel.open(
-				repStatePath,
+				tempRepStatePath,
 				StandardOpenOption.CREATE,
 				StandardOpenOption.WRITE,
 				StandardOpenOption.TRUNCATE_EXISTING)) {
@@ -370,6 +392,13 @@ public class StorageManager {
 
 			channel.force(true);
 		}
+		
+		Files.move(
+				tempRepStatePath, 
+				repStatePath, 
+				StandardCopyOption.REPLACE_EXISTING, 
+				StandardCopyOption.ATOMIC_MOVE
+				);
 
 	}
 

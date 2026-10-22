@@ -3,6 +3,7 @@ package kv.server;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.List;
 
 import kv.cluster.ClusterManager;
 import kv.cluster.ClusterReaderThread;
@@ -32,7 +33,42 @@ public class KVNodeA {
 
 		Long[] savedRepState = storageManager.loadRepState();
 		ReplicationState repState = new ReplicationState(savedRepState);
+		
+		List<String[]> log = storageManager.loadLog();
+		
+		long snapshotBoundary = storageManager.getSnapshotBoundary();
 
+		// Validate WAL continuity
+		long expectedIndex = snapshotBoundary + 1;
+
+		for (String[] entry : log) {
+		    long index = Long.parseLong(entry[0]);
+
+		    if (index != expectedIndex) {
+		        throw new IOException(
+		            "WAL gap: expected " + expectedIndex + ", found " + index
+		        );
+		    }
+
+		    expectedIndex++;
+		}
+
+		// Last valid index, or snapshot boundary if WAL is empty
+		long latestIndex = expectedIndex - 1;
+
+		if (latestIndex < repState.getLogEnd()) {
+		    throw new IOException("Replication metadata ahead of WAL");
+		}
+
+		if (latestIndex > repState.getLogEnd()) {
+		    while (repState.getLogEnd() < latestIndex) {
+		        repState.incrementLogEnd();
+		    }
+
+		    // Persist corrected metadata before accepting connections
+		    storageManager.saveRepState(repState.getRepState());
+		}
+		
 		StateManager stateManager = new StateManager(storageManager, repState);
 
 
@@ -109,6 +145,7 @@ public class KVNodeA {
 						            NODE_ID + " error closing previous-node socket: " + e.getMessage()
 						        );
 						    }
+						    clusterManager.removePeer(peer);
 						}
 
 					}).start();
@@ -123,6 +160,7 @@ public class KVNodeA {
 		new Thread(() -> {
 
 			while (true) {
+			    PeerConnection peer = null;
 				try {
 					System.out.println(
 							NODE_ID + " attempting to connect to next node on port "
@@ -132,7 +170,7 @@ public class KVNodeA {
 					nextNodeSocket =
 							new Socket("localhost", NEXT_CLUSTER_PORT);
 
-					PeerConnection peer = new PeerConnection();
+					peer = new PeerConnection();
 
 					System.out.println(
 							NODE_ID + " successfully connected to next node!"
@@ -153,7 +191,7 @@ public class KVNodeA {
 
 					reader.start();
 					writer.start();
-
+					
 					clusterManager.sendHello(peer);
 
 					// Wait here until this connection's reader dies.
@@ -172,27 +210,24 @@ public class KVNodeA {
 							);
 
 				} catch (InterruptedException e) {
+				    Thread.currentThread().interrupt();
+				    return;
 
-					// This connection-manager thread itself was asked to stop.
-					Thread.currentThread().interrupt();
-					return;
+				} finally {
+				    if (nextNodeSocket != null) {
+				        try {
+				            nextNodeSocket.close();
+				        } catch (IOException e) {
+				            System.err.println("Error closing outgoing socket: " + e.getMessage());
+				        }
+				        nextNodeSocket = null;
+				    }
+
+				    if (peer != null) {
+				        clusterManager.removePeer(peer);
+				    }
 				}
-
-				// Clean up whatever socket belonged to the failed/dead connection.
-				if (nextNodeSocket != null) {
-					try {
-						nextNodeSocket.close();
-					} catch (IOException e) {
-						System.err.println(
-								NODE_ID + " error closing old cluster socket: "
-										+ e.getMessage()
-								);
-					}
-
-					nextNodeSocket = null;
-				}
-
-				// Don't hammer the successor with connection attempts.
+				
 				try {
 					Thread.sleep(2000);
 				} catch (InterruptedException e) {

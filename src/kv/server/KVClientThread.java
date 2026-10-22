@@ -74,6 +74,11 @@ public class KVClientThread extends Thread {
                     }
 
                     ExecutionStatus status = response.getStatus();
+                    
+                    if (status == ExecutionStatus.ERR_TIMEOUT) {
+                        out.println("Error: Write timed out. Commit status unknown.");
+                        continue;
+                    }
 
                     if (action.equalsIgnoreCase("reset")) {
                         out.println(response.getPayload());

@@ -3,10 +3,11 @@ package kv.cluster;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 
 import kv.protocol.ExecutionStatus;
@@ -18,7 +19,6 @@ public class ClusterManager {
 	private NodeRole role;
 
 	private Map<String, PeerConnection> peers = new ConcurrentHashMap<>();;
-	private String successorId;
 	private String leaderId;
 
 	private record ForwardedRequest(
@@ -29,7 +29,6 @@ public class ClusterManager {
 	private Map<Long, CompletableFuture<Response>> pendingRequests =
 			new ConcurrentHashMap<>();
 	private Map<Long, ForwardedRequest> pendingForwardedRequests = new ConcurrentHashMap<>();
-	private Set<Long> majorityAcked = ConcurrentHashMap.newKeySet();
 
 	private AtomicLong nextRequestId = new AtomicLong(0);
 
@@ -49,7 +48,6 @@ public class ClusterManager {
 			ReplicationState repState) {
 
 		this.nodeId = nodeId;
-		this.successorId = successorId;
 		this.role = role;
 		this.operationProcessor = operationProcessor;
 		this.repState = repState;
@@ -87,7 +85,19 @@ public class ClusterManager {
 			sendToLeader(message);
 
 		} else {
-			long logIndex = operationProcessor.persistOperation(tokens);
+			long logIndex = 0l;
+			
+			try {
+				logIndex = operationProcessor.persistOperation(tokens);
+				
+			} catch (IOException e) {
+			    pendingRequests.remove(requestId);
+			    return new Response(
+			        ExecutionStatus.ERR_STORAGE,
+			        "Write failed due to a storage error."
+			    );
+			}
+			
 
 			pendingForwardedRequests.put(
 					logIndex,
@@ -103,14 +113,25 @@ public class ClusterManager {
 
 		}
 
-
-
-		return future.get();
+		try {
+		    return future.get(5, TimeUnit.SECONDS);
+		} catch (TimeoutException e) {
+		    return new Response(
+		        ExecutionStatus.ERR_TIMEOUT,
+		        "Write timed out; commit status unknown."
+		    );
+		} finally {
+		    pendingRequests.remove(requestId, future);
+		}
+		
 	}
 
 	public void sendToLeader(String message) {
-		PeerConnection leader = peers.get(leaderId);
-		leader.queueMessage(message);
+	    PeerConnection leader = peers.get(leaderId);
+
+	    if (leader != null) {
+	        leader.queueMessage(message);
+	    }
 	}
 
 	public void sendToFollowers(String message) {
@@ -143,8 +164,18 @@ public class ClusterManager {
 
 			long requestId = Long.parseLong(parts[1]);
 			String[] tokens = parts[2].split("\\s+");
-
-			long logIndex = operationProcessor.persistOperation(tokens);
+			
+			long logIndex = 0l;
+			
+			try {
+				logIndex = operationProcessor.persistOperation(tokens);
+				
+			} catch (IOException e) {
+				peer.queueMessage(
+					    "RESULT " + requestId + " ERR_STORAGE Write failed due to a storage error."
+					);
+				return;
+			}
 
 			pendingForwardedRequests.put(
 					logIndex,
@@ -168,16 +199,10 @@ public class ClusterManager {
 					return;
 				}
 
-				majorityAcked.add(ackedIndex);
-
 				long oldCommitIndex = repState.getCommitIndex();
 
-				while (majorityAcked.contains(repState.getCommitIndex() +1)) {
-					long nextIndex = repState.getCommitIndex() + 1;
-
-					repState.advanceCommitIndex(nextIndex);
-
-					majorityAcked.remove(nextIndex);
+				if (ackedIndex > oldCommitIndex && ackedIndex <= repState.getLogEnd()) {
+				    repState.advanceCommitIndex(ackedIndex);
 				}
 
 				long newCommitIndex = repState.getCommitIndex();
@@ -201,7 +226,9 @@ public class ClusterManager {
 							CompletableFuture<Response> future =
 									pendingRequests.remove(request.requestId());
 
-							future.complete(response);
+							if (future != null) {
+							    future.complete(response);
+							}
 
 						} else {
 
@@ -346,7 +373,9 @@ public class ClusterManager {
 			CompletableFuture<Response> future =
 					pendingRequests.remove(requestId);
 
-			future.complete(response);
+			if (future != null) {
+			    future.complete(response);
+			}
 
 		} else if (msg.startsWith("CATCHUP ")) {
 			String[] parts = msg.split(" ", 5);
@@ -407,5 +436,9 @@ public class ClusterManager {
 		}
 	}
 
-
+	public void removePeer(PeerConnection peer) {
+	    peers.values().removeIf(connection -> connection == peer);
+	}
+	
+	
 }

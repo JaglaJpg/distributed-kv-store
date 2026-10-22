@@ -40,6 +40,12 @@ public class ClusterReaderThread extends Thread{
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
 			
+		} finally {
+		    try {
+		        socket.close();
+		    } catch (IOException e) {
+		        // Socket already closed.
+		    }
 		}
 		
 	}

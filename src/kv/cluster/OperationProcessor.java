@@ -23,15 +23,32 @@ public class OperationProcessor {
 		this.state = state;
 	}
 
-	public Long persistOperation(String[] tokens) throws IOException {
-	    Long logIndex = repState.incrementLogEnd();
+	public synchronized Long persistOperation(String[] tokens) throws IOException {
+	    long logIndex = repState.getLogEnd() + 1;
 
-	    storage.appendOperation(logIndex, tokens);
-	    storage.saveRepState(repState.getRepState());
+	    try {
+	    	storage.appendOperation(logIndex, tokens);
+	    	
+	    } catch (IOException e) {
+	    	throw e;
+	    }
+
+	    repState.incrementLogEnd();
+	    
+	    try {
+	        storage.saveRepState(repState.getRepState());
+	    } catch (IOException e) {
+	        try {
+	            storage.saveRepState(repState.getRepState());
+	        } catch (IOException retryFailure) {
+	            System.err.println("FATAL: Could not persist replication metadata.");
+	            System.exit(1);
+	        }
+	    }
 
 	    return logIndex;
 	}
-
+	
 	public List<Response> applyCommittedThrough()
 	        throws InterruptedException, IOException {
 
