@@ -16,6 +16,7 @@ import kv.state.StateManager;
 import kv.storage.StorageManager;
 
 public class KVNodeA {
+	
 	private static final String NODE_ID = "Melchior-1";
 	private static final String SUCCESSOR_ID = "Casper-3";
 	private static final int CLIENT_PORT = 7001; 

@@ -8,5 +8,6 @@ public enum ExecutionStatus {
 	ERR_NOT_FOUND,
 	INVALID_COMMAND,
 	ERR_TIMEOUT,
-	ERR_STORAGE
+	ERR_STORAGE,
+	NOT_READY
 }

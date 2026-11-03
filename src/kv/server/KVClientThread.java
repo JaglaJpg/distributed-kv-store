@@ -66,8 +66,12 @@ public class KVClientThread extends Thread {
 
                     if (action.equalsIgnoreCase("GET")) {
 
-                        // Reads remain local.
-                        response = stateManager.read(tokens);
+                        if(cluster.isReady()) {
+                        	response = stateManager.read(tokens);
+                        } else {
+                        	response = new Response(ExecutionStatus.NOT_READY, "This Node is synchronising, retry shortyly");  
+                        }
+                        
 
                     } else {
                         response = cluster.handleClientMutation(tokens);

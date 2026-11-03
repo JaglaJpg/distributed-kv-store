@@ -11,14 +11,16 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 
 import kv.protocol.ExecutionStatus;
+import kv.protocol.OperationalStatus;
 import kv.protocol.Response;
 
 public class ClusterManager {
 
 	private final String nodeId;
 	private NodeRole role;
+	private volatile OperationalStatus opStatus;
 
-	private Map<String, PeerConnection> peers = new ConcurrentHashMap<>();;
+	private Map<String, PeerConnection> peers = new ConcurrentHashMap<>();
 	private String leaderId;
 
 	private record ForwardedRequest(
@@ -51,11 +53,17 @@ public class ClusterManager {
 		this.role = role;
 		this.operationProcessor = operationProcessor;
 		this.repState = repState;
+		this.opStatus = (role == NodeRole.LEADER)? OperationalStatus.READY : OperationalStatus.SYNCING;
 	}
 
 	public void sendHello(PeerConnection peer) {
-		String isLeader = (role == NodeRole.LEADER ? " LEADER" : " FOLLOWER");
-		peer.queueMessage("HELLO " + nodeId + isLeader);
+		if (role == NodeRole.LEADER) {
+			peer.queueMessage("HELLO " + nodeId + " LEADER");
+			peer.queueMessage("SYNC_STATUS " + repState.getCommitIndex());
+		} else {
+			peer.queueMessage("HELLO " + nodeId + " FOLLOWER");
+		}
+		
 	}
 
 	public void handleMessage(String msg, PeerConnection peer) throws IOException, InterruptedException {
@@ -74,6 +82,10 @@ public class ClusterManager {
 	}
 
 	public Response handleClientMutation(String[] tokens) throws InterruptedException, ExecutionException, IOException {
+		if (opStatus == OperationalStatus.SYNCING) {
+			return new Response(ExecutionStatus.NOT_READY, "This Node is synchronising, retry shortyly");
+		}
+		
 		long requestId = nextRequestId.getAndIncrement();
 
 		CompletableFuture<Response> future = new CompletableFuture<>();
@@ -397,6 +409,30 @@ public class ClusterManager {
 			}
 
 
+		} else if (msg.startsWith("SYNC_STATUS")) {
+			Long leaderCommitIndex = Long.parseLong(msg.split("\\s+")[1]);
+			Long myCommitIndex = repState.getCommitIndex();
+			Long myLogEnd = repState.getLogEnd();
+			
+			if (myLogEnd < leaderCommitIndex) {
+
+			    synchronized (catchUpLock) {
+			        catchUpInProgressThrough = leaderCommitIndex;
+			    }
+
+			    sendToLeader("CATCHUP_REQUEST SYNCING " + myLogEnd + " " + leaderCommitIndex);
+
+			} else {
+
+			    if (myCommitIndex < leaderCommitIndex) {
+			        repState.advanceCommitIndex(leaderCommitIndex);
+			        operationProcessor.applyCommittedThrough();
+			    }
+
+			    opStatus = OperationalStatus.READY;
+			}
+			
+			
 		} else if (msg.startsWith("CATCHUP_DONE ")) {
 			String[] parts = msg.split(" ");
 
@@ -417,6 +453,14 @@ public class ClusterManager {
 						operationProcessor.applyCommittedThrough();
 
 					}
+				} else if (reason.equals("SYNCING")) {
+					if (target > repState.getCommitIndex()) {
+						repState.advanceCommitIndex(target);
+						operationProcessor.applyCommittedThrough();
+						
+					}
+					opStatus = OperationalStatus.READY;
+					
 				}
 				synchronized (catchUpLock) {
 				    if (target == catchUpInProgressThrough) {
@@ -437,7 +481,22 @@ public class ClusterManager {
 	}
 
 	public void removePeer(PeerConnection peer) {
-	    peers.values().removeIf(connection -> connection == peer);
+	    peers.entrySet().removeIf(entry -> {
+	        if (entry.getValue() == peer) {
+	            String nodeId = entry.getKey();
+	            
+	            if (nodeId.equals(leaderId)) {
+	            	opStatus = OperationalStatus.SYNCING;
+	            }
+	            
+	            return true;
+	        }
+	        return false;
+	    });
+	}
+	
+	public boolean isReady() {
+		return opStatus == OperationalStatus.READY;
 	}
 	
 	
