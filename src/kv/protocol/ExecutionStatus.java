@@ -1,4 +1,4 @@
-package kv;
+package kv.protocol;
 
 public enum ExecutionStatus {
 	OK_SUCCESS,
@@ -6,5 +6,8 @@ public enum ExecutionStatus {
 	OK_UPDATED,
 	OK_DELETED,
 	ERR_NOT_FOUND,
-	INVALID_COMMAND
+	INVALID_COMMAND,
+	ERR_TIMEOUT,
+	ERR_STORAGE,
+	NOT_READY
 }

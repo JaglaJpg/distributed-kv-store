@@ -1,4 +1,4 @@
-package kv;
+package kv.protocol;
 
 public class Response {
     private final ExecutionStatus status;

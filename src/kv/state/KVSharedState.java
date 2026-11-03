@@ -1,4 +1,4 @@
-package kv;
+package kv.state;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -6,6 +6,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+
+import kv.protocol.Command;
+import kv.protocol.ExecutionStatus;
+import kv.protocol.Response;
+import kv.storage.Snapshot;
 
 public class KVSharedState {
 	private Map<String, String> store;
@@ -61,7 +66,7 @@ public class KVSharedState {
 		});
 	}
 
-	int initialiseState(Snapshot snapshot, List<String[]> operations) throws IOException {
+	int initialiseState(Snapshot snapshot, List<String[]> operations, Long lastApplied) throws IOException {
 	    long latestApplied = snapshot.getCheckNum();
 	    long resetCheckNum = 0;
 
@@ -70,6 +75,10 @@ public class KVSharedState {
 	    for (int i = operations.size() - 1; i >= 0; i--) {
 	        String[] op = operations.get(i);
 	        long opNum = Long.parseLong(op[0]);
+	        
+	        if (opNum > lastApplied) {
+	            continue;
+	        }
 
 	        if (opNum <= latestApplied) {
 	            break;
@@ -87,7 +96,13 @@ public class KVSharedState {
 	    int replayedOperations = 0;
 
 	    for (String[] tokens : operations) {
-	        if (Long.parseLong(tokens[0]) <= recoveryBoundary) {
+	        long opNum = Long.parseLong(tokens[0]);
+
+	        if (opNum <= recoveryBoundary) {
+	            continue;
+	        }
+
+	        if (opNum > lastApplied) {
 	            continue;
 	        }
 
@@ -161,24 +176,11 @@ public class KVSharedState {
 		return cmd.execute(tokens);
 	}
 
-	public boolean validateInput(String[] input) {
-		if (input == null || input.length == 0) {
-			return false;
-		}
-
-		if (input[0].equalsIgnoreCase("delete") || input[0].equalsIgnoreCase("get")) {
-			return input.length == 2;
-		} else if (input[0].equalsIgnoreCase("put")) {
-			return input.length == 3;
-		} else if (input[0].equalsIgnoreCase("reset")) {
-			return input.length == 1;
-		}
-
-		return false;
-	}
-
 	public Map<String, String> copyStore(){
 		return new HashMap<>(store);
 	}
 
+	public void replaceState(Map<String, String> snapshot) {
+		this.store = new ConcurrentHashMap<>(snapshot);
+	}
 }

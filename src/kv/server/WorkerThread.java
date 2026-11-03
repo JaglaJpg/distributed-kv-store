@@ -1,4 +1,6 @@
-package kv;
+package kv.server;
+
+import kv.state.StateManager;
 
 public class WorkerThread extends Thread {
 	private StateManager stateManager;
