@@ -57,6 +57,12 @@ public class ReplicationState {
     	lastApplied = boundary;
     }
     
+    public synchronized void reconcileSnapshotBoundary(long boundary) {
+        logEnd = Math.max(logEnd, boundary);
+        commitIndex = Math.max(commitIndex, boundary);
+        lastApplied = Math.max(lastApplied, boundary);
+    }
+    
     public Long[] getRepState() {
         return new Long[] {lastApplied, commitIndex, logEnd};
     }

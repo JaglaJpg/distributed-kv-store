@@ -54,21 +54,24 @@ public class KVNodeA {
 		    expectedIndex++;
 		}
 
-		// Last valid index, or snapshot boundary if WAL is empty
+		// Last WAL index, or snapshot boundary if WAL is empty
 		long latestIndex = expectedIndex - 1;
 
+		// Metadata must not claim entries beyond the WAL
 		if (latestIndex < repState.getLogEnd()) {
 		    throw new IOException("Replication metadata ahead of WAL");
 		}
 
-		if (latestIndex > repState.getLogEnd()) {
-		    while (repState.getLogEnd() < latestIndex) {
-		        repState.incrementLogEnd();
-		    }
+		// Repair metadata if snapshot installation was interrupted
+		repState.reconcileSnapshotBoundary(snapshotBoundary);
 
-		    // Persist corrected metadata before accepting connections
-		    storageManager.saveRepState(repState.getRepState());
+		// Recover logEnd from the validated WAL
+		while (repState.getLogEnd() < latestIndex) {
+		    repState.incrementLogEnd();
 		}
+
+		// Persist corrected metadata
+		storageManager.saveRepState(repState.getRepState());
 		
 		StateManager stateManager = new StateManager(storageManager, repState);
 
