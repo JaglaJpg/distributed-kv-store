@@ -24,3 +24,5 @@ target/
 Thumbs.db
 
 data/
+
+src/kv.zip

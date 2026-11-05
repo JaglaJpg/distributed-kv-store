@@ -359,17 +359,6 @@ public class StorageManager {
 				);
 	}
 
-	public void resetPersistance() throws IOException {
-		Files.deleteIfExists(snapshotPath);
-
-		try (FileChannel channel = FileChannel.open(
-				logPath,
-				StandardOpenOption.WRITE)) {
-
-			channel.truncate(0);
-			channel.force(true);
-		}
-	}
 
 	public synchronized void saveRepState(Long[] repState) throws IOException {
 

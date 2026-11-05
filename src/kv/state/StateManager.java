@@ -124,7 +124,6 @@ public class StateManager {
 		checkpoint.enterExclusiveOperation();
 		
 		try {
-			storage.resetPersistance();
 			checkpoint.resetMutationCount();
 			response = state.executeCommand(tokens);
 			

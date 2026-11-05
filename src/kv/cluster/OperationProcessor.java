@@ -49,7 +49,7 @@ public class OperationProcessor {
 	    return logIndex;
 	}
 	
-	public List<Response> applyCommittedThrough()
+	public synchronized List<Response> applyCommittedThrough()
 	        throws InterruptedException, IOException {
 
 	    List<Response> responses = new ArrayList<>();
@@ -75,7 +75,7 @@ public class OperationProcessor {
 	    return responses;
 	}
 
-	public Response applyCommittedOperation(String[] tokens) 
+	private Response applyCommittedOperation(String[] tokens) 
 			throws InterruptedException, IOException {
 
 		Response response = null;
