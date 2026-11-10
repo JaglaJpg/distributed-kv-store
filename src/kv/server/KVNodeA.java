@@ -8,6 +8,7 @@ import java.util.List;
 import kv.cluster.ClusterManager;
 import kv.cluster.ClusterReaderThread;
 import kv.cluster.ClusterWriterThread;
+import kv.cluster.ElectionState;
 import kv.cluster.NodeRole;
 import kv.cluster.OperationProcessor;
 import kv.cluster.PeerConnection;
@@ -34,6 +35,9 @@ public class KVNodeA {
 
 		Long[] savedRepState = storageManager.loadRepState();
 		ReplicationState repState = new ReplicationState(savedRepState);
+		
+		String[] savedElecState = storageManager.loadElecState();
+		ElectionState elecState = new ElectionState(savedElecState);
 		
 		List<String[]> log = storageManager.loadLog();
 		
@@ -93,7 +97,8 @@ public class KVNodeA {
 						SUCCESSOR_ID,
 						NodeRole.LEADER,
 						operationProcessor,
-						repState
+						repState,
+						elecState
 						);
 
 		new WorkerThread(stateManager).start();

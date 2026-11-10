@@ -38,6 +38,7 @@ public class ClusterManager {
 
 	private final OperationProcessor operationProcessor;
 	private final ReplicationState repState;
+	private final ElectionState elecState;
 
 	private final Object commitLock = new Object();
 	private final Object catchUpLock = new Object();
@@ -47,13 +48,15 @@ public class ClusterManager {
 			String successorId,
 			NodeRole role,
 			OperationProcessor operationProcessor,
-			ReplicationState repState) {
+			ReplicationState repState,
+			ElectionState elecState) {
 
 		this.nodeId = nodeId;
 		this.role = role;
 		this.operationProcessor = operationProcessor;
 		this.repState = repState;
 		this.opStatus = (role == NodeRole.LEADER)? OperationalStatus.READY : OperationalStatus.SYNCING;
+		this.elecState = elecState;
 	}
 
 	public void sendHello(PeerConnection peer) {

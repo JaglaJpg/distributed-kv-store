@@ -25,6 +25,8 @@ public class StorageManager {
     private static final String REP_STATE_FILE = "replication.meta";
     private static final String TEMP_LOG_FILE = "operations.tmp";
     private static final String TEMP_REP_STATE_FILE = "replication.tmp";
+    private static final String ELEC_STATE_FILE = "election.meta";
+    private static final String TEMP_ELEC_STATE_FILE = "election.tmp";
 
     private final Path nodeDir;
     private final Path logPath;
@@ -33,6 +35,8 @@ public class StorageManager {
     private final Path repStatePath;
     private final Path tempLogPath;
     private final Path tempRepStatePath;
+    private final Path elecStatePath;
+    private final Path tempElecStatePath;
 
     public StorageManager(String nodeId) throws IOException {
 
@@ -44,12 +48,15 @@ public class StorageManager {
         this.repStatePath = nodeDir.resolve(REP_STATE_FILE);
         this.tempLogPath = nodeDir.resolve(TEMP_LOG_FILE);
         this.tempRepStatePath = nodeDir.resolve(TEMP_REP_STATE_FILE);
+        this.elecStatePath = nodeDir.resolve(ELEC_STATE_FILE);
+        this.tempElecStatePath = nodeDir.resolve(TEMP_ELEC_STATE_FILE);
 
         Files.createDirectories(nodeDir);
         
         Files.deleteIfExists(tempSnapshotPath);
         Files.deleteIfExists(tempLogPath);
         Files.deleteIfExists(tempRepStatePath);
+        Files.deleteIfExists(tempElecStatePath);
 
         if (Files.notExists(logPath)) {
             Files.createFile(logPath);
@@ -487,5 +494,74 @@ public class StorageManager {
 		}
 		
 		return snapshotMap;
+	}
+	
+	public synchronized void saveElecState(String[] elecState) throws IOException {
+		try (FileChannel channel = FileChannel.open(
+				tempElecStatePath,
+				StandardOpenOption.CREATE,
+				StandardOpenOption.WRITE,
+				StandardOpenOption.TRUNCATE_EXISTING)) {
+
+			for (String index : elecState) {
+				String line = index + System.lineSeparator();
+
+				ByteBuffer buffer = ByteBuffer.wrap(line.getBytes(StandardCharsets.UTF_8));
+
+				while (buffer.hasRemaining()) {
+					channel.write(buffer);
+				}
+
+			}
+
+			channel.force(true);
+		}
+		
+		Files.move(
+				tempElecStatePath, 
+				elecStatePath, 
+				StandardCopyOption.REPLACE_EXISTING, 
+				StandardCopyOption.ATOMIC_MOVE
+				);
+
+	}
+	
+	public synchronized String[] loadElecState() throws IOException {
+		
+		if (Files.notExists(elecStatePath)) {
+			return new String[] {"0", null};
+		}
+		
+		String [] elecState = new String[2];
+		int i = 0;
+		
+		try (BufferedReader reader = Files.newBufferedReader(elecStatePath)) {
+			String line;
+			
+			while ((line = reader.readLine()) != null) {
+				
+				if (line.isBlank()) {
+	                continue;
+	            }
+				
+				if (i >= elecState.length) {
+	                throw new IOException("Invalid election state file");
+	            }
+				
+				if (line.equals("null")) {
+					line = null;
+				}
+				
+				elecState[i] = line == null ? null : line.trim();
+	            i++;
+			}
+		}
+		
+		if (i != 2) {
+	        throw new IOException("Invalid election state file");
+	    }
+
+	    return elecState;
+		
 	}
 }
