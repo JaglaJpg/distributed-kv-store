@@ -90,7 +90,7 @@ public class KVNodeC {
 				new ClusterManager(
 						NODE_ID,
 						SUCCESSOR_ID,
-						NodeRole.LEADER,
+						NodeRole.FOLLOWER,
 						operationProcessor,
 						repState,
 						elecState

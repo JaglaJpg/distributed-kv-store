@@ -1,8 +1,11 @@
 package kv.cluster;
 
 import java.io.IOException;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -17,7 +20,7 @@ import kv.protocol.Response;
 public class ClusterManager {
 
 	private final String nodeId;
-	private NodeRole role;
+	private volatile NodeRole role;
 	private volatile OperationalStatus opStatus;
 
 	private Map<String, PeerConnection> peers = new ConcurrentHashMap<>();
@@ -42,6 +45,12 @@ public class ClusterManager {
 
 	private final Object commitLock = new Object();
 	private final Object catchUpLock = new Object();
+	
+	private final Random rand = new Random();
+	private volatile long electionDeadline = System.nanoTime() + 
+			TimeUnit.MILLISECONDS.toNanos(rand.nextInt(1,301));
+	
+	private Set<String> myVotes = new HashSet<>();
 
 	public ClusterManager(
 			String nodeId,
@@ -68,6 +77,10 @@ public class ClusterManager {
 		}
 		
 	}
+	
+	public void sendHeartbeat() {
+		sendToFollowers("HEARTBEAT " + elecState.getCurrentTerm() + " " + nodeId);
+	}
 
 	public void handleMessage(String msg, PeerConnection peer) throws IOException, InterruptedException {
 
@@ -78,7 +91,7 @@ public class ClusterManager {
 
 		if (role == NodeRole.LEADER) {
 			handleAsLeader(msg, peer);
-		} else {
+		} else if (role == NodeRole.FOLLOWER) {
 			handleAsFollower(msg, peer);
 		}
 
@@ -101,9 +114,12 @@ public class ClusterManager {
 
 		} else {
 			long logIndex = 0l;
+			long entryTerm = 0l;
 			
 			try {
-				logIndex = operationProcessor.persistOperation(tokens);
+				entryTerm = elecState.getCurrentTerm();
+
+				logIndex = operationProcessor.persistOperation(entryTerm, tokens);
 				
 			} catch (IOException e) {
 			    pendingRequests.remove(requestId);
@@ -122,7 +138,7 @@ public class ClusterManager {
 							)
 					);
 
-			String message = "REPLICATE " + logIndex + " " + String.join(" ", tokens);
+			String message = "REPLICATE " + entryTerm + " " + logIndex + " " + entryTerm + " " + String.join(" ", tokens);
 
 			sendToFollowers(message);
 
@@ -181,9 +197,12 @@ public class ClusterManager {
 			String[] tokens = parts[2].split("\\s+");
 			
 			long logIndex = 0l;
+			long entryTerm = 0l;
 			
 			try {
-				logIndex = operationProcessor.persistOperation(tokens);
+				entryTerm = elecState.getCurrentTerm();
+				
+				logIndex = operationProcessor.persistOperation(entryTerm, tokens);
 				
 			} catch (IOException e) {
 				peer.queueMessage(
@@ -200,7 +219,7 @@ public class ClusterManager {
 							)
 					);
 
-			String message = "REPLICATE " + logIndex + " " + String.join(" ", tokens);
+			String message = "REPLICATE " + entryTerm + " " + logIndex + " " + entryTerm + " " + String.join(" ", tokens);
 
 			sendToFollowers(message);
 
@@ -319,9 +338,12 @@ public class ClusterManager {
 		if (msg.startsWith("REPLICATE ")) {
 			Long logEnd = repState.getLogEnd();
 
-			String[] parts = msg.split(" ", 3);
-			Long logIndex = Long.parseLong(parts[1]); 
-			String[] tokens = parts[2].split(" ");
+			String[] parts = msg.split(" ", 5);
+
+			long leaderTerm = Long.parseLong(parts[1]);
+			long logIndex = Long.parseLong(parts[2]);
+			long entryTerm = Long.parseLong(parts[3]);
+			String[] tokens = parts[4].split(" ");
 
 			if (logEnd < logIndex - 1) {
 
@@ -341,7 +363,7 @@ public class ClusterManager {
 				return;
 
 			} else {
-				operationProcessor.persistOperation(tokens);
+				operationProcessor.persistOperation(entryTerm, tokens);
 				sendToLeader("REPLICATE_ACK " + logIndex);
 			}
 
@@ -404,10 +426,14 @@ public class ClusterManager {
 			} else {
 				Long incomingIndex = Long.parseLong(parts[3]);
 				Long logEnd = repState.getLogEnd();
-				String[] tokens = parts[4].split(" ");
+				
+				String[] entry = parts[4].split(" ", 2);
+
+				long entryTerm = Long.parseLong(entry[0]);
+				String[] tokens = entry[1].split(" ");
 
 				if (incomingIndex == logEnd + 1) {
-					operationProcessor.persistOperation(tokens);
+					operationProcessor.persistOperation(entryTerm, tokens);
 				} 
 			}
 
@@ -502,5 +528,37 @@ public class ClusterManager {
 		return opStatus == OperationalStatus.READY;
 	}
 	
+	public NodeRole getNodeRole() {
+		return role;
+	}
+	
+	public boolean hasTimedOut() {
+		return System.nanoTime() >= electionDeadline;
+	}
+
+	public void startElection() throws IOException {
+		role = NodeRole.CANDIDATE;
+		
+		Long term = elecState.startNewTerm();
+		String votedFor = elecState.voteFor(nodeId);
+		
+		myVotes = new HashSet<>();
+		myVotes.add(votedFor);
+		
+		operationProcessor.persistElecState(elecState.getElectionState());
+		
+		electionDeadline = System.nanoTime() + 
+				TimeUnit.MILLISECONDS.toNanos(rand.nextInt(1,301));
+		
+		for (PeerConnection peer : peers.values()) {
+			if ( peer != null) {
+				peer.queueMessage("REQUEST_VOTE " + term + " ");
+			}
+		}
+		
+		//TO BE CONTINUED
+		
+		
+	}
 	
 }

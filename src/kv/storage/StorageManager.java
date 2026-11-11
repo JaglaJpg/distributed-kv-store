@@ -180,8 +180,12 @@ public class StorageManager {
 				String operationNum = line.substring(index, checkNumSpace);
 				index = checkNumSpace + 1;
 
-				int commandSpace = line.indexOf(' ', index);
+				// Read the term
+				int termSpace = line.indexOf(' ', index);
+				String term = line.substring(index, termSpace);
+				index = termSpace + 1;
 
+				int commandSpace = line.indexOf(' ', index);
 				String command;
 
 				if (commandSpace == -1) {
@@ -195,15 +199,16 @@ public class StorageManager {
 				case "RESET" -> {
 					operations.add(new String[] {
 							operationNum,
+							term,
 							command
 					});
 				}
 
 				case "DELETE" -> {
 					ParsedField key = parseField(line, index);
-
 					operations.add(new String[] {
 							operationNum,
+							term,
 							command,
 							key.value()
 					});
@@ -212,9 +217,9 @@ public class StorageManager {
 				case "PUT" -> {
 					ParsedField key = parseField(line, index);
 					ParsedField value = parseField(line, key.nextIndex());
-
 					operations.add(new String[] {
 							operationNum,
+							term,
 							command,
 							key.value(),
 							value.value()
@@ -227,10 +232,10 @@ public class StorageManager {
 		return operations;
 	}
 
-	public synchronized void appendOperation(long operationNum, String[] tokens) throws IOException {
+	public synchronized void appendOperation(long operationNum, long term, String[] tokens) throws IOException {
 		String command = tokens[0].toUpperCase();
 
-		String operation = operationNum + " " + command;
+		String operation = operationNum + " " + term + " " + command;
 
 		switch (command) {
 		case "PUT" -> {

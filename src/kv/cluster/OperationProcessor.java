@@ -23,11 +23,11 @@ public class OperationProcessor {
 		this.state = state;
 	}
 
-	public synchronized Long persistOperation(String[] tokens) throws IOException {
+	public synchronized Long persistOperation(long term, String[] tokens) throws IOException {
 	    long logIndex = repState.getLogEnd() + 1;
 
 	    try {
-	    	storage.appendOperation(logIndex, tokens);
+	    	storage.appendOperation(logIndex, term, tokens);
 	    	
 	    } catch (IOException e) {
 	    	throw e;
@@ -66,7 +66,7 @@ public class OperationProcessor {
 
 	            responses.add(
 	                applyCommittedOperation(
-	                    Arrays.copyOfRange(operation, 1, operation.length)
+	                    Arrays.copyOfRange(operation, 2, operation.length)
 	                )
 	            );
 	        }
@@ -148,6 +148,10 @@ public class OperationProcessor {
 		state.installSnapshot(snapshot);
 		
 		repState.installSnapshotBaseline(boundary);
+	}
+	
+	public synchronized void persistElecState(String[] elecState) throws IOException {
+		storage.saveElecState(elecState);
 	}
 	
 }

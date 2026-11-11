@@ -84,7 +84,7 @@ public class KVSharedState {
 	            break;
 	        }
 
-	        if (op[1].equalsIgnoreCase("RESET")) {
+	        if (op[2].equalsIgnoreCase("RESET")) {
 	            this.store = new ConcurrentHashMap<>();
 	            resetCheckNum = opNum;
 	            break;
@@ -106,7 +106,7 @@ public class KVSharedState {
 	            continue;
 	        }
 
-	        executeCommand(Arrays.copyOfRange(tokens, 1, tokens.length));
+	        executeCommand(Arrays.copyOfRange(tokens, 2, tokens.length));
 	        replayedOperations++;
 	    }
 
