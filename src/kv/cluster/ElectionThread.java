@@ -6,6 +6,7 @@ import java.util.concurrent.TimeUnit;
 public class ElectionThread extends Thread{
 	private ClusterManager clusterManager;
 	private Long lastHeartBeatTime = 0L;
+	private NodeRole previousRole = null;
 	
 	public ElectionThread(ClusterManager clusterManager) {
 		this.clusterManager = clusterManager;
@@ -14,8 +15,14 @@ public class ElectionThread extends Thread{
 	
 	@Override
 	public void run() {
-		while(true) {
+		while(!Thread.currentThread().isInterrupted()) {
 			NodeRole role = clusterManager.getNodeRole();
+
+			if (role == NodeRole.LEADER && previousRole != NodeRole.LEADER) {
+			    lastHeartBeatTime = 0L;
+			}
+
+			previousRole = role;
 			
 			switch(role) {
 			
@@ -30,6 +37,7 @@ public class ElectionThread extends Thread{
 				break;
 				
 			case CANDIDATE:
+			case FOLLOWER:
 				if (clusterManager.hasTimedOut()) {
 					try {
 						clusterManager.startElection();
@@ -38,9 +46,6 @@ public class ElectionThread extends Thread{
 					}
 				}
 				
-				break;
-				
-			case FOLLOWER:
 				break;
 				
 			default:

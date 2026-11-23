@@ -63,7 +63,6 @@ public class OperationProcessor {
 	        Long index = Long.parseLong(operation[0]);
 
 	        if (index > lastApplied && index <= commitIndex) {
-
 	            responses.add(
 	                applyCommittedOperation(
 	                    Arrays.copyOfRange(operation, 2, operation.length)
@@ -100,7 +99,7 @@ public class OperationProcessor {
 			return input.length == 2;
 		} else if (input[0].equalsIgnoreCase("put")) {
 			return input.length == 3;
-		} else if (input[0].equalsIgnoreCase("reset")) {
+		} else if (input[0].equalsIgnoreCase("reset") || input[0].equalsIgnoreCase("no_op")) {
 			return input.length == 1;
 		}
 
@@ -140,6 +139,14 @@ public class OperationProcessor {
 		
 	}
 	
+	public Long[] retrieveBoundaryIndexAndTerm() throws IOException {
+		Long[] boundaries = new Long[1];
+		
+		boundaries[0] = storage.getSnapshotBoundary();
+		
+		return boundaries;
+	}
+	
 	public void installSnapshotCatchUp(String serialisedSnapshot, long boundary) throws IOException {
 		Map<String, String> snapshot = storage.deserialiseSnapshot(serialisedSnapshot);
 		
@@ -154,4 +161,70 @@ public class OperationProcessor {
 		storage.saveElecState(elecState);
 	}
 	
+	public synchronized long retrieveLastLogTerm() throws IOException {
+		List<String[]> log = storage.loadLog();
+		
+		if (log.isEmpty()) {
+		    return 0L;
+		}
+		
+		String[] lastEntry = log.get(log.size()-1);
+		
+		return Long.parseLong(lastEntry[1]);
+	}
+	
+	public synchronized long retrieveLogTerm(Long index) throws IOException {
+		List<String[]> log = storage.loadLog();
+		long term = -1l;
+		
+		for (String[] entry : log) {
+			if (Long.parseLong(entry[0]) != index) {
+				continue;
+			}
+			
+			term = Long.parseLong(entry[1]);
+			break;
+		}
+		
+		if (term != -1l) {
+			return term;
+		} else {
+			throw new IllegalStateException(
+				    "WAL entry not found at index: " + index
+				);
+		}
+	}
+	
+	public synchronized String[] retrieveEntry(Long index) throws IOException {
+		List<String[]> log = storage.loadLog();
+		String[] tokens = null;
+		
+		for (String[] entry : log) {
+			if (Long.parseLong(entry[0]) != index) {
+				continue;
+			}
+			
+			tokens = entry;
+			break;
+		}
+		
+		if (tokens != null) {
+			return tokens;
+		} else {
+			throw new IllegalStateException(
+				    "WAL entry not found at index: " + index
+				);
+		}
+	}
+	
+	public synchronized void truncateUncommittedFrom(long index) throws IOException {
+		if (index <= repState.getCommitIndex()) {
+		    throw new IllegalStateException(
+		        "Cannot truncate committed log entry at index " + index
+		    );
+		}
+		
+		storage.truncateLogFrom(index);
+		repState.retreatLogEnd(index-1);
+	}
 }

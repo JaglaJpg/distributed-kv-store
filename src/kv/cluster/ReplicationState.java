@@ -42,6 +42,15 @@ public class ReplicationState {
         return commitIndex;
     }
 
+    public synchronized long retreatLogEnd(Long newLogEnd) {
+        if (newLogEnd < commitIndex) {
+            throw new IllegalArgumentException("logEnd cannot be less than commitIndex");
+        }
+
+        logEnd = newLogEnd;
+        return logEnd;
+    }
+    
     public synchronized long incrementLastApplied() {
         if (lastApplied + 1 > commitIndex) {
             throw new IllegalStateException("lastApplied cannot exceed commitIndex");

@@ -34,6 +34,10 @@ public class StateManager {
 			return handleReset(tokens);
 		}
 		
+		if (command.equalsIgnoreCase("NO_OP")) {
+			return null;
+		}
+		
 		Response response = null;
 		String key = tokens[1];
 		

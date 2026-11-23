@@ -232,6 +232,7 @@ public class StorageManager {
 		return operations;
 	}
 
+	
 	public synchronized void appendOperation(long operationNum, long term, String[] tokens) throws IOException {
 		String command = tokens[0].toUpperCase();
 
@@ -322,55 +323,15 @@ public class StorageManager {
 			channel.force(true);
 		}
 
-		try (FileChannel channel = FileChannel.open(
-				tempLogPath, 
-				StandardOpenOption.CREATE,
-				StandardOpenOption.WRITE,
-				StandardOpenOption.TRUNCATE_EXISTING )) {
-			
-			try (BufferedReader reader = Files.newBufferedReader(logPath)) {
-				String line;
-
-				while ((line = reader.readLine()) != null) {
-					if (line.isBlank()) {
-						continue;
-					}
-					
-					if(Long.parseLong(line.split(" ")[0]) <= lastApplied) {
-						continue;
-					
-					} else {
-						String record = line + System.lineSeparator();
-
-						ByteBuffer buffer =
-						        ByteBuffer.wrap(record.getBytes(StandardCharsets.UTF_8));
-						
-						while (buffer.hasRemaining()) {
-							channel.write(buffer);
-						}
-					}
-					
-				}
-			}
-			
-			channel.force(true);
-		}
-		
 		Files.move(
-				tempSnapshotPath, 
-				snapshotPath, 
-				StandardCopyOption.REPLACE_EXISTING, 
-				StandardCopyOption.ATOMIC_MOVE
-				);
-		
-		Files.move(
-				tempLogPath, 
-				logPath, 
-				StandardCopyOption.REPLACE_EXISTING, 
-				StandardCopyOption.ATOMIC_MOVE
-				);
+			    tempSnapshotPath,
+			    snapshotPath,
+			    StandardCopyOption.REPLACE_EXISTING,
+			    StandardCopyOption.ATOMIC_MOVE
+			);
+
+			compactLogThrough(lastApplied);
 	}
-
 
 	public synchronized void saveRepState(Long[] repState) throws IOException {
 
@@ -568,5 +529,88 @@ public class StorageManager {
 
 	    return elecState;
 		
+	}
+	
+	public synchronized void truncateLogFrom(long index) throws IOException {
+		try (FileChannel channel = FileChannel.open(
+				tempLogPath, 
+				StandardOpenOption.CREATE,
+				StandardOpenOption.WRITE,
+				StandardOpenOption.TRUNCATE_EXISTING )) {
+			
+			try (BufferedReader reader = Files.newBufferedReader(logPath)) {
+				String line;
+
+				while ((line = reader.readLine()) != null) {
+					if (line.isBlank()) {
+						continue;
+					}
+					
+					if(Long.parseLong(line.split(" ")[0]) >= index) {
+						continue;
+					
+					} else {
+						String record = line + System.lineSeparator();
+
+						ByteBuffer buffer =
+						        ByteBuffer.wrap(record.getBytes(StandardCharsets.UTF_8));
+						
+						while (buffer.hasRemaining()) {
+							channel.write(buffer);
+						}
+					}
+					
+				}
+			}
+			
+			channel.force(true);
+		}
+		
+		Files.move(
+				tempLogPath, 
+				logPath, 
+				StandardCopyOption.REPLACE_EXISTING, 
+				StandardCopyOption.ATOMIC_MOVE
+				);
+	}
+	
+	public synchronized void compactLogThrough(long index) throws IOException {
+	    try (FileChannel channel = FileChannel.open(
+	            tempLogPath,
+	            StandardOpenOption.CREATE,
+	            StandardOpenOption.WRITE,
+	            StandardOpenOption.TRUNCATE_EXISTING)) {
+
+	        try (BufferedReader reader = Files.newBufferedReader(logPath)) {
+	            String line;
+
+	            while ((line = reader.readLine()) != null) {
+	                if (line.isBlank()) {
+	                    continue;
+	                }
+
+	                if (Long.parseLong(line.split(" ")[0]) <= index) {
+	                    continue;
+	                }
+
+	                ByteBuffer buffer = ByteBuffer.wrap(
+	                    (line + System.lineSeparator()).getBytes(StandardCharsets.UTF_8)
+	                );
+
+	                while (buffer.hasRemaining()) {
+	                    channel.write(buffer);
+	                }
+	            }
+	        }
+
+	        channel.force(true);
+	    }
+
+	    Files.move(
+	        tempLogPath,
+	        logPath,
+	        StandardCopyOption.REPLACE_EXISTING,
+	        StandardCopyOption.ATOMIC_MOVE
+	    );
 	}
 }
