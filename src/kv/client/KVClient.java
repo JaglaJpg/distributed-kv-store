@@ -9,7 +9,7 @@ import java.net.UnknownHostException;
 
 public class KVClient {
 	private static final String DEFAULT_SERVER_NAME = "localhost";
-	private static final int DEFAULT_SERVER_PORT = 7001; 
+	private static final int DEFAULT_SERVER_PORT = 7002; 
 	
 	@SuppressWarnings("resource")
 	public static void main(String[] args) throws IOException {

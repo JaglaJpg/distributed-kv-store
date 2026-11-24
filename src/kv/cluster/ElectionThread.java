@@ -30,7 +30,11 @@ public class ElectionThread extends Thread{
 				Long currentTime = System.nanoTime();
 				
 				if (lastHeartBeatTime == 0 || currentTime -lastHeartBeatTime >= TimeUnit.MILLISECONDS.toNanos(200)) {
-					clusterManager.sendHeartbeat();
+					try {
+						clusterManager.sendHeartbeat();
+					} catch (IOException e) {
+						e.printStackTrace();
+					}
 					lastHeartBeatTime = currentTime;
 				}
 				
