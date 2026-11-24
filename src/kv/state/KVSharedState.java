@@ -64,9 +64,13 @@ public class KVSharedState {
 			
 			return new Response(ExecutionStatus.OK_SUCCESS, "Successfully Reset Data Store");
 		});
+		
+		commands.put("NO_OP", (tokens) -> {
+		    return new Response(ExecutionStatus.OK_SUCCESS);
+		});
 	}
 
-	int initialiseState(Snapshot snapshot, List<String[]> operations, Long lastApplied) throws IOException {
+	public int initialiseState(Snapshot snapshot, List<String[]> operations, Long lastApplied) throws IOException {
 	    long latestApplied = snapshot.getCheckNum();
 	    long resetCheckNum = 0;
 

@@ -196,7 +196,7 @@ public class StorageManager {
 				}
 
 				switch (command.toUpperCase()) {
-				case "RESET" -> {
+				case "RESET", "NO_OP" -> {
 					operations.add(new String[] {
 							operationNum,
 							term,

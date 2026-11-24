@@ -9,7 +9,7 @@ import kv.cluster.ClusterManager;
 import kv.cluster.ClusterReaderThread;
 import kv.cluster.ClusterWriterThread;
 import kv.cluster.ElectionState;
-import kv.cluster.NodeRole;
+import kv.cluster.ElectionThread;
 import kv.cluster.OperationProcessor;
 import kv.cluster.PeerConnection;
 import kv.cluster.ReplicationState;
@@ -20,6 +20,7 @@ public class KVNodeC {
 
     private static final String NODE_ID = "Casper-3";
     private static final String SUCCESSOR_ID = "Balthasar-2";
+	private static final String PREDECESSOR_ID = "Melchior-1";
     private static final int CLIENT_PORT = 7003;
     private static final int MY_CLUSTER_PORT = 8003;
     private static final int NEXT_CLUSTER_PORT = 8002;
@@ -89,14 +90,13 @@ public class KVNodeC {
     	ClusterManager clusterManager =
 				new ClusterManager(
 						NODE_ID,
-						SUCCESSOR_ID,
-						NodeRole.FOLLOWER,
 						operationProcessor,
 						repState,
 						elecState
 						);
 
         new WorkerThread(stateManager).start();
+        new ElectionThread(clusterManager).start();
 
         try {
             kvServerSocket = new ServerSocket(CLIENT_PORT);
@@ -121,7 +121,7 @@ public class KVNodeC {
 
                 while (true) {
                     Socket acceptedSocket = clusterListener.accept();
-                    PeerConnection peer = new PeerConnection();
+                    PeerConnection peer = new PeerConnection(PREDECESSOR_ID);
 
                     System.out.println(
                         "Previous node connected to " + NODE_ID
@@ -199,7 +199,7 @@ public class KVNodeC {
                     nextNodeSocket =
                             new Socket("localhost", NEXT_CLUSTER_PORT);
 
-                    peer = new PeerConnection();
+                    peer = new PeerConnection(SUCCESSOR_ID);
 
                     System.out.println(
                         NODE_ID + " successfully connected to next node!"
